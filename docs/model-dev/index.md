@@ -35,6 +35,12 @@ Reason about the three-stage cost model and choose a parallelism scheme to maxim
 
 ::::
 
+## Evaluation reports
+
+[HunyuanImage-3.0-Instruct on Trainium2: NxDI evaluation](reports/hunyuan-image3-trn2-20261009.md)
+documents an external implementation's measured accuracy and performance, including
+open correctness issues and its backend differences from this plugin.
+
 :::{toctree}
 :maxdepth: 1
 :hidden:
@@ -43,4 +49,5 @@ Onboarding a model <onboarding-models>
 Accuracy evaluation and debugging <accuracy-evaluation-debugging>
 Kernel implementations <kernels/index>
 Optimizing offline video generation <optimizing-offline-video-generation>
+HunyuanImage-3.0-Instruct NxDI evaluation <reports/hunyuan-image3-trn2-20261009>
 :::

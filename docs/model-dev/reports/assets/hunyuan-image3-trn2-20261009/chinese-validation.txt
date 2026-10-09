@@ -1,0 +1,4166 @@
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=0)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0000 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0040 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0098 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0098 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000692)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=1)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0063 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0091 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0120 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0149 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018506)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=2)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0082 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0119 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0127 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0143 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016144)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=3)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0078 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0122 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0181 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0181 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.021727)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=4)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0168  K50: 0.0168  K1000: 0.0313  All: 0.0313
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0168 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0168 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0313 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0313 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.039622)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=5)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0042 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0101 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0101 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0130 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.004740)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=6)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0114  K50: 0.0114  K1000: 0.0161  All: 0.0212
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0114 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0114 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0161 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0212 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.042094)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=7)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0046 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0061 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0096 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0101 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018793)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=8)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0067 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0092 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0092 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0092 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007449)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=9)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0074 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0149 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0149 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0149 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.020011)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=10)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0066 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0066 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0074 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0082 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000172)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=11)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0108 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0145 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0145 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0145 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000548)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=12)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0070 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0115 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0129 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0161 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.037026)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=13)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0072 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0072 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0090 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0090 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003914)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=14)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0130  K50: 0.0206  K1000: 0.0206  All: 0.0206
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0130 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0206 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0206 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0206 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015802)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=15)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0065 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0067 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0075 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0089 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002291)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=16)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0050 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0111 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0128 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0188 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.023698)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=17)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0221  K50: 0.0221  K1000: 0.0237  All: 0.0237
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0221 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0221 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0237 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0237 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.014540)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=18)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0079 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0159 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0159 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0175 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000258)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=19)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0042 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0075 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0090 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0107 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.017128)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=20)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0074 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0126 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0161 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0161 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007231)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=21)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0042 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0051 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0073 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0105 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008873)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=22)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0103 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0185 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0205 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0205 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009753)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=23)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0061 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0061 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0070 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0070 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007422)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=24)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0064 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0064 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0078 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0078 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001645)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=25)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0043 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0072 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0072 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0072 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008178)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=26)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0024 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0054 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0056 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0056 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.013720)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=27)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0075 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0075 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0075 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0075 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018117)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=28)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0074 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0142 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0142 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0142 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003445)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=29)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0090  K50: 0.0304  K1000: 0.0314  All: 0.0314
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0090 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0304 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0314 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0314 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.006778)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=30)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0078 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0114 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0163 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0195 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.035740)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=31)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0038 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0072 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0072 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0089 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007524)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=32)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0070 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0070 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0070 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0083 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002576)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=33)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0052 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0067 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0083 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0083 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018024)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=34)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0163  K50: 0.0337  K1000: 0.0341  All: 0.0341
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0163 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0337 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0341 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0341 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.056702)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=35)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0064 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0064 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0064 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0064 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.004600)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=36)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0069 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0116 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0116 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0128 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011380)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=37)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0030 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0038 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0064 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0064 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007514)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=38)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0128  K50: 0.0307  K1000: 0.0307  All: 0.0307
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0128 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0307 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0307 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0307 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.072251)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=39)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0063 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0063 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0081 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0081 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.014244)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=40)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0065 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0083 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0090 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0101 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009958)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=41)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0002 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0051 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0067 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0067 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003943)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=42)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0058 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0058 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0058 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0060 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018129)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=43)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0137  K50: 0.0153  K1000: 0.0153  All: 0.0175
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0137 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0153 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0153 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0175 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.100080)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=44)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0035 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0069 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0086 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0086 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001466)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=45)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0001 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0038 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0053 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0071 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002366)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=46)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0001 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0033 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0042 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0066 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001967)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=47)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0057 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0057 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0081 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0103 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.013702)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=48)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0111  K50: 0.0111  K1000: 0.0139  All: 0.0153
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0111 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0111 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0139 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0153 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000122)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=49)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0061 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0061 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0132 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0132 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011323)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=50)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0191  K50: 0.0287  K1000: 0.0287  All: 0.0322
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0191 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0287 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0287 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0322 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003381)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=51)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0071 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0071 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0071 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0071 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008082)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=52)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0084 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0084 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0108 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0119 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.023664)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=53)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0037 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0083 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0096 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0096 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.004968)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=54)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0042 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0085 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0140 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0140 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.033698)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=55)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0115  K50: 0.0118  K1000: 0.0123  All: 0.0165
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0115 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0118 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0123 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0165 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.028422)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=56)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0035 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0050 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0067 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0067 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002168)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=57)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0036 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0068 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0120 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0130 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009183)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=58)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0005 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0076 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0076 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0076 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009082)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=59)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0050 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0078 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0124 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0187 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009909)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=60)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0103 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0103 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0166 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0211 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018162)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=61)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0105 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0194 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0194 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0202 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.031741)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=62)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0072 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0134 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0134 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0134 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016334)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=63)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0055 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0056 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0056 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0075 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016253)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=64)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0075 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0075 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0078 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0095 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.064855)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=65)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0080 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0174 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0174 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0174 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.029036)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=66)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0043 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0112 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0121 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0121 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007046)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=67)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0034 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0051 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0067 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0084 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002972)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=68)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0029 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0043 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0061 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0061 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.012646)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=69)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0036 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0050 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0050 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0073 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.020532)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=70)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0043 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0095 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0095 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0095 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015102)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=71)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0061 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0061 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0061 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0061 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002285)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=72)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0085 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0114 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0289 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0289 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.040718)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=73)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0039 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0076 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0076 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0076 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001576)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=74)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0044 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0073 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0113 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0132 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008087)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=75)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0054 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0054 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0056 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0063 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.010515)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=76)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0073 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0133 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0133 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0171 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.023651)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=77)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0045 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0045 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0062 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0080 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016218)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=78)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0112  K50: 0.0163  K1000: 0.0169  All: 0.0235
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0112 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0163 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0169 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0235 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.017792)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=79)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0040 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0040 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0079 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0079 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001109)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=80)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0030 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0030 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0038 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0051 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.004941)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=81)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0018 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0043 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0043 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0043 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001642)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=82)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0055 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0058 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0058 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0073 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005746)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=83)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0070  K50: 0.0262  K1000: 0.0262  All: 0.0262
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0070 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0262 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0262 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0262 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.019705)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=84)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0030 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0058 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0070 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0093 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002769)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=85)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0123  K50: 0.0168  K1000: 0.0180  All: 0.0211
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0123 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0168 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0180 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0211 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.073268)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=86)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0029 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0029 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0043 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0063 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000095)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=87)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0201  K50: 0.0296  K1000: 0.0296  All: 0.0296
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0201 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0296 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0296 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0296 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.082055)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=88)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0083 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0166 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0166 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0176 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.046272)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=89)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0047 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0144 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0163 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0163 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.014073)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=90)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0095  K50: 0.0260  K1000: 0.0260  All: 0.0295
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0095 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0260 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0260 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0295 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.020112)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=91)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0071  K50: 0.0297  K1000: 0.0297  All: 0.0297
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0071 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0297 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0297 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0297 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.006745)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=92)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0047 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0094 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0094 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0094 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.010369)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=93)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0060  K50: 0.0204  K1000: 0.0204  All: 0.0204
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0060 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0204 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0204 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0204 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.020387)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=94)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0076 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0084 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0092 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0122 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.023233)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=95)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0071  K50: 0.0300  K1000: 0.0300  All: 0.0300
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0071 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0300 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0300 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0300 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009387)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=96)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0038 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0049 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0066 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0084 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005382)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=97)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0081 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0081 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0105 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0151 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008628)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=98)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0190  K50: 0.0278  K1000: 0.0434  All: 0.0434
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0190 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0278 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0434 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0434 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.037717)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=99)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0082  K50: 0.0239  K1000: 0.0290  All: 0.0339
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0082 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0239 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0290 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0339 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.006037)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=100)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0033 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0197 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0222 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0222 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000947)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=101)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0051 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0183 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0279 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0279 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.012178)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=102)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0061 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0069 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0069 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0077 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007227)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=103)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0027 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0134 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0176 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0197 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009716)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=104)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0045 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0101 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0155 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0155 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015285)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=105)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0206  K50: 0.0387  K1000: 0.0496  All: 0.0496
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0206 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0387 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0496 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0496 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.042672)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=106)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0099  K50: 0.0309  K1000: 0.0309  All: 0.0309
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0099 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0309 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0309 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0309 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005100)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=107)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0097 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0135 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0229 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0296 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.044761)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=108)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0054 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0094 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0127 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0127 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.021617)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=109)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0034 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0118 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0118 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0118 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.006590)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=110)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0036 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0116 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0163 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0182 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003447)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=111)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0198  K50: 0.0347  K1000: 0.0347  All: 0.0347
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0198 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0347 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0347 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0347 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.085130)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=112)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0091 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0091 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0112 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0121 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015067)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=113)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0062 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0096 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0096 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0096 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.013129)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=114)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0060 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0076 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0076 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0076 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.010263)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=115)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0044 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0092 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0092 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0092 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.025908)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=116)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0023 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0056 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0076 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0080 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018690)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=117)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0079 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0079 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0079 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0088 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005394)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=118)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0064 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0113 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0135 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0147 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011726)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=119)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0064 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0064 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0064 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0064 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000153)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=120)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0080 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0080 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0080 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0080 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005744)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=121)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0032 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0032 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0034 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0039 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008279)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=122)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0045 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0087 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0087 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0087 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001664)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=123)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0063 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0080 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0099 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0107 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009705)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=124)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0044 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0069 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0096 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0156 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.028068)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=125)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0041 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0072 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0076 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0076 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.018921)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=126)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0063 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0063 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0063 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0098 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.013867)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=127)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0060 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0114 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0123 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0204 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.020439)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=128)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0071 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0125 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0125 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0125 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.010803)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=129)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0028 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0040 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0057 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0074 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011061)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=130)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0084  K50: 0.0125  K1000: 0.0309  All: 0.0461
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0084 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0125 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0309 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0461 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002030)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=131)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0035 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0035 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0051 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0067 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007298)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=132)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0025 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0025 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0032 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0039 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001382)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=133)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0186  K50: 0.0252  K1000: 0.0252  All: 0.0252
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0186 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0252 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0252 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0252 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.021996)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=134)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0077 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0077 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0095 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0100 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011299)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=135)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ Acceptable divergence + TopK errors Δ = 0.1250   | K5: 0.0149  K50: 0.0214  K1000: 0.0214  All: 0.0226
+
+⟲ Teacher Forcing Applied: Models diverged but continuing validation with expected tokens
+
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.1250 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0149 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0214 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0214 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0226 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.024953)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=136)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0125  K50: 0.0176  K1000: 0.0176  All: 0.0176
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0125 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0176 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0176 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0176 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.022467)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=137)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0027 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0059 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0061 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0061 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009111)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=138)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0072 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0136 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0186 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0224 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.006091)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=139)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0095 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0095 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0103 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0141 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001759)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=140)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0090 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0090 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0090 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0090 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007790)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=141)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0193  K50: 0.0193  K1000: 0.0285  All: 0.0285
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0193 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0193 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0285 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0285 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.041153)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=142)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0086 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0165 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0165 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0165 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.011310)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=143)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0160  K50: 0.0160  K1000: 0.0160  All: 0.0160
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0160 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0160 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0160 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0160 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.019452)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=144)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0053 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0115 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0130 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0145 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016058)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=145)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0074 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0082 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0082 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0084 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008336)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=146)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0061 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0181 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0189 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0189 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.047631)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=147)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0037 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0179 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0179 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0179 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.008571)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=148)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0101 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0165 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0186 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0251 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.021540)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=149)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0069 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0069 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0069 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0075 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001983)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=150)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0032 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0071 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0097 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0110 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.014794)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=151)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0065 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0065 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0065 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0068 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002294)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=152)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0046 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0090 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0096 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0096 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003398)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=153)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0063 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0063 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0063 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0063 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007021)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=154)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0038 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0038 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0055 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0057 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.001435)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=155)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0148  K50: 0.0148  K1000: 0.0148  All: 0.0148
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0148 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0148 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0148 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0148 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.019809)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=156)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0068 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0199 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0199 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0199 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002610)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=157)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0047 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0093 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0105 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0115 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000543)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=158)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0123  K50: 0.0123  K1000: 0.0123  All: 0.0124
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0123 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0123 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0123 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0124 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.016108)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=159)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0040 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0125 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0125 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0125 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003978)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=160)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0045 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0058 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0090 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0097 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015158)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=161)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0069 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0113 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0113 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0143 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.019832)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=162)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0029 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0077 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0077 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0077 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.010860)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=163)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0090 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0091 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0091 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0110 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.058240)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=164)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0023 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0151 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0282 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0327 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.029977)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=165)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0038 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0177 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0177 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0177 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002502)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=166)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0038 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0075 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0080 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0080 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000505)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=167)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0048 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0084 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0101 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0101 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.021245)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=168)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0175  K50: 0.0252  K1000: 0.0386  All: 0.0386
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0175 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0252 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0386 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0386 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.033710)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=169)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0065 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0082 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0098 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0147 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000897)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=170)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0022 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0065 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0065 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0065 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.014295)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=171)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0185  K50: 0.0326  K1000: 0.0326  All: 0.0326
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0185 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0326 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0326 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0326 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.007186)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=172)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0193  K50: 0.0193  K1000: 0.0193  All: 0.0193
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0193 (threshold: 0.011) ✗ at Batch 0 Token 0
+- K50: 0.0193 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0193 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0193 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.009518)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=173)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0068 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0101 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0114 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0118 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.005004)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=174)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0021 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0064 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0095 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0095 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.024737)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=175)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0065  K50: 0.0342  K1000: 0.0342  All: 0.0342
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0065 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0342 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0342 (threshold: 0.03) ✗ at Batch 0 Token 0
+- All: 0.0342 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.025274)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=176)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+Batch 0 Token  0: ✗ TopK errors                                      | K5: 0.0098  K50: 0.0230  K1000: 0.0230  All: 0.0230
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: FAILED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0098 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0230 (threshold: 0.02) ✗ at Batch 0 Token 0
+- K1000: 0.0230 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0230 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.036717)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=177)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0086 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0163 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0164 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0164 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.015003)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=178)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0032 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0032 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0058 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0058 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.003364)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=179)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0033 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0119 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0127 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0127 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.002979)
+================================================================================
+
+================================================================================
+LOGIT VALIDATION RESULTS (request=1 frozen_step=180)
+================================================================================
+VALIDATION THRESHOLDS
+Divergence: 1 ULP(s) (dynamic, 7 mantissa bits)
+TopK Error Tolerances (rtol): K5: 0.011, K50: 0.02, K1000: 0.03, All: 0.05
+
+All 1 tokens passed validation
+
+=== VALIDATION SUMMARY ===
+Total Tokens: 1 (1 per batch, 1 batches)
+Overall Status: PASSED
+
+Max Errors:
+- Divergence: 0.0000 (threshold: 1 ULP(s)) ✓ at Batch 0 Token 0
+- K5: 0.0041 (threshold: 0.011) ✓ at Batch 0 Token 0
+- K50: 0.0082 (threshold: 0.02) ✓ at Batch 0 Token 0
+- K1000: 0.0093 (threshold: 0.03) ✓ at Batch 0 Token 0
+- All: 0.0093 (threshold: 0.05) ✓ at Batch 0 Token 0
+
+Removed constant shift in logits (max |shift|: 0.000889)
+================================================================================

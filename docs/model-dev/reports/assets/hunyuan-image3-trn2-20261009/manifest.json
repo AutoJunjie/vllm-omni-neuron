@@ -1,0 +1,70 @@
+{
+  "evaluation_date": "2026-10-09",
+  "scope": "Published evaluation attachments; no weights, raw tensors or runtime adapter",
+  "byte_identical_copies": {
+    "position-summary.csv": {
+      "source_sha256": "006491a4d263b5857801507d2f6909f16995bb297c7d0432f78d8f807790d569"
+    },
+    "english-validation.txt": {
+      "source_sha256": "f5f2df9c732420a9e713023e8757ebc17711e087b44fc93a0b6a43d2be9e3366"
+    },
+    "chinese-validation.txt": {
+      "source_sha256": "5470bbb8e32f2fd42d375a4b0bdd16a2762ac9dd18cff42d3c4e1955b12bd67c"
+    },
+    "sdk-50steps.png": {
+      "source_sha256": "95c9d4f2b1546dd3facac3f44ca80f97fa91d004bdc747a122ba59bc001f5490"
+    }
+  },
+  "source_artifact_sha256": {
+    "primary_accuracy_summary": "a812cc3b8f242841089e1edafcd2697dae61c3517917295f6ff9231168a98b85",
+    "public_tool_report_before_publication_filter": "4ecabfe4e907c269467885e86c2aaafc3593b998974146567a033feb32715193",
+    "original_gates": "a807038e4fe0bdc89dac508ad71c540a65bd4ae6ee4cf9f22cbf5470fc650f99",
+    "cosine_and_performance_derivation": "91fb7f40e39007ec3f3e4f693b83cbadc198f27fa2738a2b538257bac8723255",
+    "capture_report": "1ec9159803b3a652b8ce486acd70c74216139da63ae217a4c476bfe97aaaa2fc",
+    "50_step_audit": "ea72a48e8e72849b8997556a10c6f2576522ba6d69d140934b8057460e325dd3",
+    "2_step_audit": "1fb37399b7f6fc5afc65043cf592ecbddd463d0105122188f571bd8d60ae1be6"
+  },
+  "transformations": {
+    "public-tools.json": "Metric values unchanged; host boot identity and local visualization paths omitted. The original interactive HTML plots are not included.",
+    "results.json": "Selected metric, timing, version and hash fields; no operational identity",
+    "ar-logit-comparison.svg": "Matplotlib plot of position-summary.csv; no new inference"
+  },
+  "published_files": {
+    ".gitattributes": {
+      "sha256": "91cf3bb7962ac45e3c30bfff457da1945c5aa490d3fff105c48f5c82d8348fcf",
+      "bytes": 395
+    },
+    "ar-logit-comparison.svg": {
+      "sha256": "103be6b51dfe7a8cc7359a239b04c519a9a0b02780e41cb917ed319e619cf9ac",
+      "bytes": 51936
+    },
+    "chinese-validation.txt": {
+      "sha256": "5470bbb8e32f2fd42d375a4b0bdd16a2762ac9dd18cff42d3c4e1955b12bd67c",
+      "bytes": 170888
+    },
+    "english-validation.txt": {
+      "sha256": "f5f2df9c732420a9e713023e8757ebc17711e087b44fc93a0b6a43d2be9e3366",
+      "bytes": 247147
+    },
+    "position-summary.csv": {
+      "sha256": "006491a4d263b5857801507d2f6909f16995bb297c7d0432f78d8f807790d569",
+      "bytes": 82201
+    },
+    "public-tools.json": {
+      "sha256": "e1a4f61c3d5b412b4bdd120934260bf8f00c59881b9536b79be8ccba6e5b005f",
+      "bytes": 2128529
+    },
+    "results.json": {
+      "sha256": "e4c0a198992b96be5226e88eef9f20c8dbcf1d214fd8613b6033155d2f016af2",
+      "bytes": 41363
+    },
+    "sdk-50steps.png": {
+      "sha256": "95c9d4f2b1546dd3facac3f44ca80f97fa91d004bdc747a122ba59bc001f5490",
+      "bytes": 994123
+    },
+    "summarize.py": {
+      "sha256": "3c8362d67c0a5ec253c8516dc5e2c229d9f910dfc400b1737792bb5dbce1762c",
+      "bytes": 2196
+    }
+  }
+}

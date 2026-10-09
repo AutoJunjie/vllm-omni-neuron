@@ -1,0 +1,8 @@
+# Preserve the original CSV bytes, including its standard CRLF record endings.
+position-summary.csv -text whitespace=cr-at-eol linguist-generated=true
+
+# Keep captured output and derived artifacts collapsed in the code review.
+*-validation.txt linguist-generated=true
+public-tools.json linguist-generated=true
+results.json linguist-generated=true
+ar-logit-comparison.svg linguist-generated=true
