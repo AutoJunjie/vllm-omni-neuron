@@ -1185,23 +1185,24 @@ def expected_checkpoint_keys(transformer: NeuronHunyuanImage3Transformer) -> Ite
 def nki_mlp_enabled(model_config: dict | None) -> bool:
     """Resolve the ``moe_kernel`` stage-config knob.
 
-    Defaults to ``nki``, which routes the MoE through the blockwise CTE MoE kernel
-    (``NF.moe_cte``). That kernel computes only the (token, expert) pairs the router
-    selected, so it both covers the dominant compute with NKI and drops roughly 8x of
-    the dense path's FLOPs for this model's top-8-of-64 routing. Measured against the
-    torch MoE math on device at the model's shapes: 7.4e-03 relative, BF16 level.
+    Defaults to ``torch``: every local expert evaluated densely for every token. That
+    is the path validated end to end on device.
 
-    ``torch`` selects the dense fallback — every local expert evaluated for every token
-    — which is what the CPU numerics test exercises and what to switch to when bisecting
-    an accuracy regression.
+    ``nki`` routes the routed experts through the blockwise CTE MoE kernel
+    (``NF.moe_cte``), which computes only the (token, expert) pairs the router selected —
+    NKI on the dominant compute, and roughly 8x fewer FLOPs for this model's
+    top-8-of-64 routing. Standalone on device at the model's shapes it matches the torch
+    MoE math to 7.4e-03 (BF16 level), but the full 32-layer graph compiles and then fails
+    at execution with "Failed to schedule neff execution. status=1", so it stays opt-in
+    until that is resolved. See ``examples/hunyuan_image3/check_moe_cte.py``.
     """
-    choice = str((model_config or {}).get("moe_kernel", "nki")).lower()
+    choice = str((model_config or {}).get("moe_kernel", "torch")).lower()
     if choice not in ("nki", "torch"):
         raise ValueError(f"model_config.moe_kernel must be 'nki' or 'torch', got {choice!r}")
-    if choice == "torch":
+    if choice == "nki":
         logger.warning(
-            "HunyuanImage3 MoE: blockwise NKI kernel disabled; every local expert will "
-            "be evaluated densely for every token."
+            "HunyuanImage3 MoE: using the blockwise CTE NKI kernel, which is validated "
+            "standalone but not yet in the full 32-layer graph."
         )
     return choice == "nki"
 
