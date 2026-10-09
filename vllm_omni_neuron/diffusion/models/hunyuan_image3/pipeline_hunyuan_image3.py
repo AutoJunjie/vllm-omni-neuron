@@ -339,16 +339,24 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         self.model.load_weights(model_path)
         self._load_replicated_weights(model_path)
 
-    def _replicated_weight_targets(self) -> dict[str, tuple[str, torch.Tensor]]:
-        """``{checkpoint key -> (parameter name, tensor)}`` for the non-sharded modules."""
-        targets: dict[str, tuple[str, torch.Tensor]] = {}
+    def _replicated_weight_targets(self) -> dict[str, tuple[str, torch.Tensor, bool]]:
+        """``{checkpoint key -> (parameter name, tensor, required)}`` for non-sharded modules.
+
+        Buffers are optional: a module may carry derived state (e.g. a VAE's cached
+        constants) that the checkpoint does not store.
+        """
+        targets: dict[str, tuple[str, torch.Tensor, bool]] = {}
+
+        def add(module: nn.Module, prefix: str) -> None:
+            for name, tensor in module.named_parameters():
+                targets[f"{prefix}.{name}"] = (f"{prefix}.{name}", tensor, True)
+            for name, tensor in module.named_buffers():
+                targets.setdefault(f"{prefix}.{name}", (f"{prefix}.{name}", tensor, False))
+
         for prefix in _REPLICATED_PREFIXES:
-            module = getattr(self, prefix)
-            for name, tensor in list(module.named_parameters()) + list(module.named_buffers()):
-                targets[f"{prefix}.{name}"] = (f"{prefix}.{name}", tensor)
-        targets["model.wte.weight"] = ("wte.weight", self.wte.weight)
-        for name, tensor in list(self.vae.named_parameters()) + list(self.vae.named_buffers()):
-            targets[f"vae.{name}"] = (f"vae.{name}", tensor)
+            add(getattr(self, prefix), prefix)
+        add(self.vae, "vae")
+        targets["model.wte.weight"] = ("wte.weight", self.wte.weight, True)
         return targets
 
     def _load_replicated_weights(self, model_path: str) -> None:
@@ -375,10 +383,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 for key in keys:
                     if key not in available:
                         continue
-                    param_name, tensor = targets[key]
+                    param_name, tensor, _ = targets[key]
                     loaded[param_name] = handle.get_tensor(key).to(tensor.dtype)
 
-        missing = sorted({name for name, _ in targets.values()} - set(loaded))
+        missing = sorted(
+            {name for name, _, required in targets.values() if required} - set(loaded)
+        )
         if missing:
             raise RuntimeError(
                 f"HunyuanImage3: {len(missing)} replicated weights are missing from the "
@@ -460,6 +470,16 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         """
         mask = attention_mask[0, 0].bool().cpu()
         total = mask.shape[0]
+        # Only two mask rows are read; with CFG both batch rows must agree on them,
+        # otherwise one branch would silently run with the other's visibility.
+        for row in (prompt_len, min(prompt_len + 1, total - 1)):
+            reference = attention_mask[0, 0, row].bool().cpu()
+            for branch in range(1, attention_mask.shape[0]):
+                if not bool(torch.all(attention_mask[branch, 0, row].bool().cpu() == reference)):
+                    raise ValueError(
+                        "The Neuron HunyuanImage3 path requires the CFG branches to share "
+                        f"the generation mask (row {row} differs on branch {branch})."
+                    )
         image_len = total - prompt_len
         if image_len <= 1:
             raise ValueError(

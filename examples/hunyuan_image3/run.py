@@ -128,13 +128,19 @@ def main() -> None:
     )
 
     steps = args.num_inference_steps or (2 if args.dev else 50)
-    params = OmniDiffusionSamplingParams(
+    sampling_kwargs = dict(
         height=args.height,
         width=args.width,
         num_inference_steps=steps,
-        guidance_scale=args.guidance_scale,
         seed=args.seed,
     )
+    if args.guidance_scale is not None:
+        # guidance_scale alone is ignored downstream; the pipeline reads the
+        # `_provided` flag to tell an explicit value from the schema default.
+        sampling_kwargs.update(
+            guidance_scale=args.guidance_scale, guidance_scale_provided=True
+        )
+    params = OmniDiffusionSamplingParams(**sampling_kwargs)
 
     print(f"Generating {args.width}x{args.height}, {steps} steps")
     start = time.perf_counter()
