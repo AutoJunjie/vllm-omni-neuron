@@ -132,6 +132,12 @@ def main() -> None:
     selected = int((affinities != 0).sum().item())
     print(f"local (token, expert) pairs selected: {selected} of {tokens * num_local_experts}")
 
+    # The kernel gathers tokens in 128-row tiles and addresses past the last real
+    # token for padding positions, so the buffers must be a whole number of blocks:
+    # at T=8194 it reaches row 8319. Pad up, mark the tail as padding, slice back after.
+    padded = -(-tokens // args.block_size) * args.block_size
+    print(f"padding tokens {tokens} -> {padded} for the kernel's tile addressing")
+
     hidden = (torch.randn(tokens, HIDDEN, dtype=torch.bfloat16) * 0.05).contiguous()
     gate_w = torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
     up_w = torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
@@ -139,7 +145,7 @@ def main() -> None:
     # The kernel wants gate and up fused as [E, H, 2, I].
     gate_up = torch.stack((gate_w, up_w), dim=2).contiguous()
 
-    def moe(hidden_d, affinities_d, gate_up_d, down_d):
+    def moe(hidden_d, affinities_d, gate_up_d, down_d, padding_mask_d):
         (
             affinities_masked,
             token_position_to_id,
@@ -152,6 +158,7 @@ def main() -> None:
             block_size=args.block_size,
             moe_group=get_tp_group(),
             tp_degree=1,
+            padding_mask=padding_mask_d,
         )
         return NF.moe_cte(
             implementation=MoECTEImplementation.shard_on_block,
@@ -168,14 +175,21 @@ def main() -> None:
             is_tensor_update_accumulating=True,
         )
 
+    hidden_padded = F.pad(hidden, (0, 0, 0, padded - tokens))
+    affinities_padded = F.pad(affinities, (0, 0, 0, padded - tokens))
+    padding_mask = torch.zeros(padded, dtype=torch.bool)
+    padding_mask[:tokens] = True
+
     compiled = _compile(moe, "hunyuan_check_moe_cte")
     actual = compiled(
-        hidden.to(device),
-        affinities.to(device),
+        hidden_padded.to(device),
+        affinities_padded.to(device),
         gate_up.to(device),
         down_w.to(device),
+        padding_mask.to(device),
     )
     actual = (actual[0] if isinstance(actual, tuple) else actual).to("cpu").float()
+    actual = actual[:tokens]
 
     expected = _torch_moe(
         hidden.float(), affinities, gate_w.float(), up_w.float(), down_w.float()
