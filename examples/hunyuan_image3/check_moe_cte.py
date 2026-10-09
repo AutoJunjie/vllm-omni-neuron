@@ -54,6 +54,21 @@ parser.add_argument("--tp-size", type=int, default=32, help="EP degree (experts 
 parser.add_argument("--tokens", type=int, default=8194, help="CFG batch x (1 + image tokens)")
 parser.add_argument("--block-size", type=int, default=256)
 parser.add_argument("--tolerance", type=float, default=3e-2)
+parser.add_argument(
+    "--instances",
+    type=int,
+    default=1,
+    help="How many chained moe_cte calls to put in one graph. The model needs 32 "
+    "(one per decoder layer) and that graph does not execute, so sweep this to find "
+    "where it breaks and whether the limit is the instance count or a resource "
+    "threshold.",
+)
+parser.add_argument(
+    "--share-weights",
+    action="store_true",
+    help="Reuse one expert weight set across instances, separating instance count "
+    "from weight residency (the model has a distinct set per layer).",
+)
 args = parser.parse_args()
 
 
