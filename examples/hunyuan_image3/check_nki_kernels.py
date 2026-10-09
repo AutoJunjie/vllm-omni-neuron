@@ -50,6 +50,12 @@ parser.add_argument("--tokens", type=int, default=8194, help="CFG batch x (1 + i
 parser.add_argument("--prefill-len", type=int, default=512)
 parser.add_argument("--tolerance", type=float, default=2e-2)
 parser.add_argument(
+    "--mlp-tokens",
+    default="8194,4096,2048,1024,512,256,128",
+    help="Token counts to try for the MLP kernel, largest first. Each must be even\n"
+    "(the grid=2 launch splits batch x seq).",
+)
+parser.add_argument(
     "--only",
     default="o_proj,attention,mlp",
     help="Comma-separated subset of o_proj,attention,mlp. A run that first launched the\n"
@@ -97,10 +103,19 @@ def _relative_error(actual: torch.Tensor, expected: torch.Tensor) -> float:
 
 
 def check_swiglu_mlp(device) -> dict[str, float]:
-    """nkilib SwiGLU MLP vs torch, under both gate/up operand assignments."""
+    """nkilib SwiGLU MLP vs torch, sweeping the token count to find the usable chunk.
+
+    The kernel validates its own tile budget at trace time and rejects the model's full
+    8194-token batch with ``[NCC_INKI016] ... Stack out of memory``. That is a clean
+    compile-time exception, not a device hang, so the sweep can walk the candidates in
+    one process and report where the limit actually is. The MLP is token-wise, so the
+    largest passing chunk is all the model needs — it can slice the token dim and
+    concatenate.
+
+    Also reports the error for *both* gate/up operand assignments, so the output states
+    which operand nkilib activates rather than assuming it.
+    """
     torch.manual_seed(0)
-    tokens = args.tokens
-    hidden = torch.randn(1, tokens, HIDDEN, dtype=torch.bfloat16) * 0.05
     gate_w = torch.randn(HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
     up_w = torch.randn(HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
     down_w = torch.randn(MOE_INTERMEDIATE, HIDDEN, dtype=torch.bfloat16) * 0.02
@@ -110,29 +125,60 @@ def check_swiglu_mlp(device) -> dict[str, float]:
     def kernel(h, g, u, d, bi, bo):
         return hyt._hunyuan_nki_swiglu_mlp(h, g, u, d, bi, bi, bo)
 
-    compiled = _compile(kernel, "hunyuan_check_swiglu_mlp")
-    actual = compiled(
-        hidden.to(device),
-        gate_w.to(device),
-        up_w.to(device),
-        down_w.to(device),
-        inner_bias.to(device),
-        outer_bias.to(device),
-    ).to("cpu")
+    candidates = [int(t) for t in args.mlp_tokens.split(",") if t.strip()]
+    results: dict[str, float] = {}
+    best: tuple[int, float, float] | None = None
 
-    hidden_f = hidden.float()
-    activate_gate = torch.matmul(
-        F.silu(torch.matmul(hidden_f, gate_w.float())) * torch.matmul(hidden_f, up_w.float()),
-        down_w.float(),
-    )
-    activate_up = torch.matmul(
-        F.silu(torch.matmul(hidden_f, up_w.float())) * torch.matmul(hidden_f, gate_w.float()),
-        down_w.float(),
-    )
-    return {
-        "activation_on_gate_operand": _relative_error(actual, activate_gate),
-        "activation_on_up_operand": _relative_error(actual, activate_up),
-    }
+    for tokens in candidates:
+        hidden = torch.randn(1, tokens, HIDDEN, dtype=torch.bfloat16) * 0.05
+        compiled = _compile(kernel, f"hunyuan_check_swiglu_mlp_t{tokens}")
+        try:
+            actual = compiled(
+                hidden.to(device),
+                gate_w.to(device),
+                up_w.to(device),
+                down_w.to(device),
+                inner_bias.to(device),
+                outer_bias.to(device),
+            ).to("cpu")
+        except Exception as error:  # noqa: BLE001 - the point is to classify it
+            reason = str(error).replace("\n", " ")
+            marker = "NCC_INKI" in reason and reason[reason.index("NCC_INKI") : ][:11] or type(error).__name__
+            print(f"  mlp tokens={tokens:<6d} REJECTED  {marker}", flush=True)
+            continue
+
+        hidden_f = hidden.float()
+        activate_gate = torch.matmul(
+            F.silu(torch.matmul(hidden_f, gate_w.float()))
+            * torch.matmul(hidden_f, up_w.float()),
+            down_w.float(),
+        )
+        activate_up = torch.matmul(
+            F.silu(torch.matmul(hidden_f, up_w.float()))
+            * torch.matmul(hidden_f, gate_w.float()),
+            down_w.float(),
+        )
+        err_gate = _relative_error(actual, activate_gate)
+        err_up = _relative_error(actual, activate_up)
+        print(
+            f"  mlp tokens={tokens:<6d} OK        gate-operand {err_gate:.4e} / "
+            f"up-operand {err_up:.4e}",
+            flush=True,
+        )
+        if best is None or tokens > best[0]:
+            best = (tokens, err_gate, err_up)
+
+    if best is None:
+        raise SystemExit(
+            "FAIL: the nkilib SwiGLU MLP kernel rejected every token count in "
+            f"{candidates}"
+        )
+    tokens, err_gate, err_up = best
+    print(f"\nlargest usable MLP token chunk: {tokens}")
+    results["activation_on_gate_operand"] = err_gate
+    results["activation_on_up_operand"] = err_up
+    results["mlp_max_tokens"] = float(tokens)
+    return results
 
 
 def check_causal_attention(device) -> dict[str, float]:
@@ -210,7 +256,10 @@ def main() -> None:
         partial = checks[name](device)
         results.update(partial)
         for key, error in partial.items():
-            print(f"  {key:34s} {error:.4e}", flush=True)
+            if key == "mlp_max_tokens":
+                print(f"  {key:34s} {int(error)}", flush=True)
+            else:
+                print(f"  {key:34s} {error:.4e}", flush=True)
 
     mlp_errors = [
         results[key]
@@ -225,11 +274,15 @@ def main() -> None:
             "checkpoint's second gate_and_up_proj chunk as `gate`."
         )
 
+    informational = (
+        "activation_on_gate_operand",
+        "activation_on_up_operand",
+        "mlp_max_tokens",
+    )
     failures = {
         name: error
         for name, error in results.items()
-        if name not in ("activation_on_gate_operand", "activation_on_up_operand")
-        and error > args.tolerance
+        if name not in informational and error > args.tolerance
     }
     if mlp_errors and min(mlp_errors) > args.tolerance:
         failures["swiglu_mlp"] = min(mlp_errors)
