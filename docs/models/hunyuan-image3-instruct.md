@@ -82,7 +82,7 @@ is ever dispatched to the device under the Lite runtime.
 | --- | --- | --- |
 | `attention_cte` (causal, d-major output) | prompt prefill attention | torch masked softmax |
 | `output_projection_cte` | every attention output projection | `matmul` + bias |
-| nkilib `mlp` (SwiGLU, `ActFnType.SILU`) | every routed and shared expert | `silu(x @ gate) * (x @ up)` then `@ down` |
+| nkilib `mlp` (SwiGLU, `ActFnType.SiLU`) | every routed and shared expert | `silu(x @ gate) * (x @ up)` then `@ down` |
 
 Each kernel is gated on `can_run_kernel` and its own tiling limits, so CPU mode and
 fake-tensor tracing take the torch path. `model_config.moe_kernel: torch` forces the
