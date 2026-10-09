@@ -124,6 +124,31 @@ Per-request stage timings are written to
 `prefill_seconds`, `denoise_seconds`, `seconds_per_step`, `vae_decode_seconds` and
 `e2e_forward_seconds`.
 
+## Measured performance
+
+One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, `moe_kernel: torch`,
+CFG batch of 2 (`guidance_scale` 2.5), warm NEFF cache:
+
+| Stage | Seconds |
+| --- | --- |
+| Prompt prefill | 23.7 |
+| Denoise (50 steps) | 1911.4 (38.2 / step) |
+| VAE decode (host, float32) | 28.1 |
+| End to end | 1963.3 |
+
+The cold NEFF build for both graphs takes roughly 30 minutes on top of that; a warm
+server answers its first request immediately and becomes healthy in about 90 seconds.
+
+The offline runner and the OpenAI chat endpoint produce **byte-identical** output for the
+same prompt, seed and step count (`sha256 f62b9113...` for the Mars-observatory prompt at
+seed 42), so the serving path adds no numerical divergence.
+
+Per-step time is dominated by the routed MoE: every rank evaluates both of its local
+experts densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs,
+and it runs as plain matmuls because the nkilib SwiGLU kernel is disabled (see
+[Known limits](#known-limits)). Sparse expert dispatch and a working MLP kernel are the
+two levers worth pulling first.
+
 ## Validation
 
 `test/unit/test_hunyuan_image3_numerics.py` builds a tiny random checkpoint in the real
@@ -148,7 +173,8 @@ VLLM_NEURON_CPU_MODE=1 python test/unit/test_hunyuan_image3_numerics.py
   costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
-- The VAE decode runs on the host in float32, so it is not accelerated.
+- The VAE decode runs on the host in float32 on the output rank only, so it is neither
+  accelerated nor parallel (28 s at 1024x1024).
 - The nkilib SwiGLU MLP kernel is not validated on this stack. On a managed cluster a
   hung NeuronCore can get the whole instance replaced within seconds, so set
   `NEURON_RT_EXEC_TIMEOUT` (the env profile defaults it to 600 s) and disable node
