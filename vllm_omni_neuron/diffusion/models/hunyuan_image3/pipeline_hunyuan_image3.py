@@ -714,10 +714,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         denoise_start = time.perf_counter()
         for index, timestep in enumerate(timesteps):
             self._current_timestep = timestep
-            model_input = latents.repeat(cfg_factor, 1, 1, 1).to(
-                device=self.device, dtype=self.model.dtype
-            )
-            t_expand = timestep.repeat(cfg_factor).to(device=self.device, dtype=torch.float32)
+            # Cast on the host and transfer separately: the Lite runtime's copy
+            # requires matching dtypes, so a single .to(device=..., dtype=...) raises
+            # "Expected self.dtype() == dst.dtype()".
+            model_input = latents.repeat(cfg_factor, 1, 1, 1).to(self.model.dtype)
+            model_input = model_input.to(self.device)
+            t_expand = timestep.repeat(cfg_factor).to(torch.float32).to(self.device)
             pred = self._run_denoise_step(
                 model_input,
                 t_expand,
@@ -727,7 +729,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 image_key_bias,
                 *prompt_kv,
             )
-            pred = pred.to(device="cpu", dtype=torch.float32)
+            # Same rule in the other direction: copy first, then widen on the host.
+            pred = pred.cpu().to(torch.float32)
             if cfg_factor == 2:
                 pred_cond, pred_uncond = pred.chunk(2)
                 pred = pred_uncond + guidance * (pred_cond - pred_uncond)
