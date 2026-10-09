@@ -584,6 +584,19 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
     ) -> DiffusionOutput:
         """Generate one image: prefill the prompt once, then replay the denoise NEFF."""
         del kwargs
+        # The engine's warmup request runs at its own resolution (512x512), which is a
+        # different compiled shape than the one real requests use, so honouring it would
+        # buy a second cold NEFF build and nothing else. Skip it the way the Wan2.2
+        # pipeline does.
+        if getattr(self, "skip_warmup", False) and getattr(req, "request_ids", None) == [
+            "dummy_req_id"
+        ]:
+            first = req.prompts[0] if req.prompts else None
+            prompt_text = first if isinstance(first, str) else (first or {}).get("prompt")
+            if prompt_text == "dummy run":
+                logger.info("Skipping warmup request on the Neuron HunyuanImage3 pipeline")
+                return DiffusionOutput(output=None)
+
         start = time.perf_counter()
         sampling = req.sampling_params
         extra_args = getattr(sampling, "extra_args", {}) or {}
