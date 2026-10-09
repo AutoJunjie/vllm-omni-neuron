@@ -51,9 +51,9 @@ parser.add_argument("--prefill-len", type=int, default=512)
 parser.add_argument("--tolerance", type=float, default=2e-2)
 parser.add_argument(
     "--mlp-tokens",
-    default="8194,4096,2048,1024,512,256,128",
-    help="Token counts to try for the MLP kernel, largest first. Each must be even\n"
-    "(the grid=2 launch splits batch x seq).",
+    default="8194,4x2048,16x512,32x256,64x128,256",
+    help="Shapes to try for the MLP kernel, as TOKENS or BATCHxSEQ. batch*seq must\n"
+    "be even (the grid=2 launch splits batch x seq).",
 )
 parser.add_argument(
     "--only",
@@ -125,13 +125,27 @@ def check_swiglu_mlp(device) -> dict[str, float]:
     def kernel(h, g, u, d, bi, bo):
         return hyt._hunyuan_nki_swiglu_mlp(h, g, u, d, bi, bi, bo)
 
-    candidates = [int(t) for t in args.mlp_tokens.split(",") if t.strip()]
+    # Each candidate is "batch x seq". The kernel takes [B, S, H] and the grid=2 launch
+    # splits batch x seq, so a limit driven by the sequence loop rather than by the total
+    # token count would let the model fold its 8194 tokens into a wider, shorter batch and
+    # keep one launch per expert instead of 33.
+    candidates: list[tuple[int, int]] = []
+    for item in args.mlp_tokens.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "x" in item:
+            b, t = item.split("x")
+            candidates.append((int(b), int(t)))
+        else:
+            candidates.append((1, int(item)))
+
     results: dict[str, float] = {}
     best: tuple[int, float, float] | None = None
 
-    for tokens in candidates:
-        hidden = torch.randn(1, tokens, HIDDEN, dtype=torch.bfloat16) * 0.05
-        compiled = _compile(kernel, f"hunyuan_check_swiglu_mlp_t{tokens}")
+    for batch, tokens in candidates:
+        hidden = torch.randn(batch, tokens, HIDDEN, dtype=torch.bfloat16) * 0.05
+        compiled = _compile(kernel, f"hunyuan_check_swiglu_mlp_b{batch}t{tokens}")
         try:
             actual = compiled(
                 hidden.to(device),
@@ -144,7 +158,10 @@ def check_swiglu_mlp(device) -> dict[str, float]:
         except Exception as error:  # noqa: BLE001 - the point is to classify it
             reason = str(error).replace("\n", " ")
             marker = "NCC_INKI" in reason and reason[reason.index("NCC_INKI") : ][:11] or type(error).__name__
-            print(f"  mlp tokens={tokens:<6d} REJECTED  {marker}", flush=True)
+            print(
+                f"  mlp {batch}x{tokens} (={batch * tokens} tokens) REJECTED  {marker}",
+                flush=True,
+            )
             continue
 
         hidden_f = hidden.float()
@@ -161,12 +178,12 @@ def check_swiglu_mlp(device) -> dict[str, float]:
         err_gate = _relative_error(actual, activate_gate)
         err_up = _relative_error(actual, activate_up)
         print(
-            f"  mlp tokens={tokens:<6d} OK        gate-operand {err_gate:.4e} / "
-            f"up-operand {err_up:.4e}",
+            f"  mlp {batch}x{tokens} (={batch * tokens} tokens) OK  "
+            f"gate-operand {err_gate:.4e} / up-operand {err_up:.4e}",
             flush=True,
         )
-        if best is None or tokens > best[0]:
-            best = (tokens, err_gate, err_up)
+        if best is None or batch * tokens > best[0]:
+            best = (batch * tokens, err_gate, err_up)
 
     if best is None:
         raise SystemExit(
@@ -174,7 +191,7 @@ def check_swiglu_mlp(device) -> dict[str, float]:
             f"{candidates}"
         )
     tokens, err_gate, err_up = best
-    print(f"\nlargest usable MLP token chunk: {tokens}")
+    print(f"\nlargest usable MLP token count per launch: {tokens}")
     results["activation_on_gate_operand"] = err_gate
     results["activation_on_up_operand"] = err_up
     results["mlp_max_tokens"] = float(tokens)
