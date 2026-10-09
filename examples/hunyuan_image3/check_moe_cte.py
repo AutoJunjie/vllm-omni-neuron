@@ -115,9 +115,11 @@ def main() -> None:
     device = current_omni_platform.get_torch_device(0)
     num_local_experts = NUM_EXPERTS // args.tp_size
     tokens = args.tokens
+    n = args.instances
     print(
         f"device={device} ep_degree={args.tp_size} local_experts={num_local_experts} "
-        f"tokens={tokens} block_size={args.block_size}"
+        f"tokens={tokens} block_size={args.block_size} instances={n} "
+        f"weights={'shared' if args.share_weights else 'distinct'}"
     )
 
     torch.manual_seed(0)
@@ -132,20 +134,30 @@ def main() -> None:
     selected = int((affinities != 0).sum().item())
     print(f"local (token, expert) pairs selected: {selected} of {tokens * num_local_experts}")
 
-    # The kernel gathers tokens in 128-row tiles and addresses past the last real
-    # token for padding positions, so the buffers must be a whole number of blocks:
-    # at T=8194 it reaches row 8319. Pad up, mark the tail as padding, slice back after.
+    # The kernel gathers tokens in 128-row tiles and addresses past the last real token
+    # for padding positions, so the buffers must be a whole number of blocks: at T=8194
+    # it reaches row 8319. Pad up, mark the tail as padding, slice back after.
     padded = -(-tokens // args.block_size) * args.block_size
     print(f"padding tokens {tokens} -> {padded} for the kernel's tile addressing")
 
     hidden = (torch.randn(tokens, HIDDEN, dtype=torch.bfloat16) * 0.05).contiguous()
-    gate_w = torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
-    up_w = torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
-    down_w = torch.randn(num_local_experts, MOE_INTERMEDIATE, HIDDEN, dtype=torch.bfloat16) * 0.02
-    # The kernel wants gate and up fused as [E, H, 2, I].
-    gate_up = torch.stack((gate_w, up_w), dim=2).contiguous()
 
-    def moe(hidden_d, affinities_d, gate_up_d, down_d, padding_mask_d):
+    def _weight_set():
+        gate_w = (
+            torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
+        )
+        up_w = (
+            torch.randn(num_local_experts, HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
+        )
+        down_w = (
+            torch.randn(num_local_experts, MOE_INTERMEDIATE, HIDDEN, dtype=torch.bfloat16) * 0.02
+        )
+        # The kernel wants gate and up fused as [E, H, 2, I], index 0 = gate.
+        return torch.stack((gate_w, up_w), dim=2).contiguous(), down_w
+
+    weight_sets = [_weight_set()] if args.share_weights else [_weight_set() for _ in range(n)]
+
+    def _one_moe(hidden_d, affinities_d, gate_up_d, down_d, padding_mask_d):
         (
             affinities_masked,
             token_position_to_id,
@@ -157,10 +169,12 @@ def main() -> None:
             num_experts_per_token=TOP_K,
             block_size=args.block_size,
             moe_group=get_tp_group(),
+            # Pure expert parallelism: each rank owns whole experts, so the kernel needs
+            # no intra-expert sharding collectives.
             tp_degree=1,
             padding_mask=padding_mask_d,
         )
-        return NF.moe_cte(
+        output = NF.moe_cte(
             implementation=MoECTEImplementation.shard_on_block,
             conditions=conditions,
             hidden_states=hidden_d,
@@ -174,30 +188,56 @@ def main() -> None:
             skip_token=True,
             is_tensor_update_accumulating=True,
         )
+        return output[0] if isinstance(output, tuple) else output
+
+    def moe(hidden_d, affinities_d, padding_mask_d, *weight_tensors):
+        # Chain the calls so none can be eliminated: each instance consumes the previous
+        # output. One instance is the standalone case; 32 is what the model's fused
+        # denoise graph asks the compiler for, and that graph does not execute.
+        out = hidden_d
+        for index in range(n):
+            offset = 0 if args.share_weights else 2 * index
+            out = _one_moe(
+                out.to(hidden_d.dtype),
+                affinities_d,
+                weight_tensors[offset],
+                weight_tensors[offset + 1],
+                padding_mask_d,
+            )
+        return out
 
     hidden_padded = F.pad(hidden, (0, 0, 0, padded - tokens))
     affinities_padded = F.pad(affinities, (0, 0, 0, padded - tokens))
     padding_mask = torch.zeros(padded, dtype=torch.bool)
     padding_mask[:tokens] = True
 
-    compiled = _compile(moe, "hunyuan_check_moe_cte")
+    device_weights = []
+    for gate_up, down in weight_sets:
+        device_weights.extend((gate_up.to(device), down.to(device)))
+
+    compiled = _compile(moe, f"hunyuan_check_moe_cte_x{n}")
     actual = compiled(
         hidden_padded.to(device),
         affinities_padded.to(device),
-        gate_up.to(device),
-        down_w.to(device),
         padding_mask.to(device),
+        *device_weights,
     )
     actual = (actual[0] if isinstance(actual, tuple) else actual).to("cpu").float()
     actual = actual[:tokens]
+    print(f"executed {n} chained instance(s); output {tuple(actual.shape)}")
+    if not bool(torch.isfinite(actual).all()):
+        raise SystemExit("FAIL: output contains non-finite values")
 
-    expected = _torch_moe(
-        hidden.float(), affinities, gate_w.float(), up_w.float(), down_w.float()
-    )
-    if actual.shape != expected.shape:
-        print(f"shape mismatch: kernel {tuple(actual.shape)} vs torch {tuple(expected.shape)}")
-        actual = actual.reshape(expected.shape)
+    if n > 1:
+        # Chaining bf16 MoE outputs compounds rounding, so the numeric check is the
+        # single-instance case; above that, executing at all is the finding.
+        print("OK (instance-count check; numerics are checked at --instances 1)")
+        return
 
+    gate_up, down = weight_sets[0]
+    gate_w = gate_up[:, :, 0, :]
+    up_w = gate_up[:, :, 1, :]
+    expected = _torch_moe(hidden.float(), affinities, gate_w.float(), up_w.float(), down.float())
     scale = expected.abs().max().item()
     error = (actual - expected).abs().max().item() / max(scale, 1e-12)
     print(f"\nmoe_cte relative max error vs torch: {error:.4e}  (signal {scale:.4e})")
