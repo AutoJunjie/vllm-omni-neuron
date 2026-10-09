@@ -127,27 +127,37 @@ Per-request stage timings are written to
 ## Measured performance
 
 One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, `moe_kernel: torch`,
-CFG batch of 2 (`guidance_scale` 2.5), warm NEFF cache:
+CFG batch of 2 (`guidance_scale` 2.5).
+
+Steady state, measured through the OpenAI chat endpoint on a warm server:
 
 | Stage | Seconds |
 | --- | --- |
-| Prompt prefill | 23.7 |
-| Denoise (50 steps) | 1911.4 (38.2 / step) |
-| VAE decode (host, float32) | 28.1 |
-| End to end | 1963.3 |
+| Prompt prefill | 0.03 |
+| Denoise (50 steps) | 44.8 (**0.90 / step**) |
+| VAE decode (host, float32) | 25.3 |
+| End to end | 70.2 |
 
-The cold NEFF build for both graphs takes roughly 30 minutes on top of that; a warm
-server answers its first request immediately and becomes healthy in about 90 seconds.
+vLLM-Omni's `diffusion_benchmark_serving.py` over 4 sequential 1024x1024 / 50-step
+requests: 4/4 successful, 282.55 s wall, latency mean 70.64 s, median 70.68 s,
+P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105.
+
+The first request on a cold NEFF cache is much slower because `torch.compile` builds both
+graphs on their first call, inside the generation: 1963 s end to end, of which roughly
+30 minutes is compilation. Point `TORCH_NEURONX_NEFF_CACHE_DIR` at storage that outlives
+the container and only the first run ever pays it; a warm server then becomes healthy in
+about 90 seconds and its first request is already at steady state.
 
 The offline runner and the OpenAI chat endpoint produce **byte-identical** output for the
 same prompt, seed and step count (`sha256 f62b9113...` for the Mars-observatory prompt at
 seed 42), so the serving path adds no numerical divergence.
 
-Per-step time is dominated by the routed MoE: every rank evaluates both of its local
-experts densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs,
-and it runs as plain matmuls because the nkilib SwiGLU kernel is disabled (see
+At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local experts
+densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs, and it
+runs as plain matmuls because the nkilib SwiGLU kernel is disabled (see
 [Known limits](#known-limits)). Sparse expert dispatch and a working MLP kernel are the
-two levers worth pulling first.
+two levers worth pulling first. The host-side VAE decode is then the next largest term,
+at 36% of a warm request.
 
 ## Validation
 
