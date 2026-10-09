@@ -316,7 +316,7 @@ def _hunyuan_swiglu_mlp_kernel(hidden, gate_weight, up_weight, down_weight):
         normalization_bias_tensor=None,
         fused_add_tensor=None,
         store_fused_add_result=False,
-        activation_fn=ActFnType.SILU,
+        activation_fn=ActFnType.SiLU,
         normalization_type=NormType.NO_NORM,
         quantization_type=QuantizationType.NONE,
         gate_w_scale=None,

@@ -177,13 +177,13 @@ def main() -> None:
     print(f"device={device} tp_size={args.tp_size} tokens={args.tokens}")
 
     results: dict[str, float] = {}
-    results.update(check_output_projection(device))
-    results.update(check_causal_attention(device))
-    results.update(check_swiglu_mlp(device))
-
-    print("\n--- relative max error vs torch ---")
-    for name, error in results.items():
-        print(f"  {name:34s} {error:.4e}")
+    # Report each check as it lands: a later kernel failing should not hide the
+    # earlier ones' numbers.
+    for check in (check_output_projection, check_causal_attention, check_swiglu_mlp):
+        partial = check(device)
+        results.update(partial)
+        for name, error in partial.items():
+            print(f"  {name:34s} {error:.4e}")
 
     mlp_gate = results["activation_on_gate_operand"]
     mlp_up = results["activation_on_up_operand"]
