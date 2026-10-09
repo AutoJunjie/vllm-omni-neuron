@@ -64,6 +64,14 @@ parser.add_argument(
     "threshold.",
 )
 parser.add_argument(
+    "--router-in-graph",
+    action="store_true",
+    help="Compute the router inside the compiled graph (logits -> softmax -> topk ->\n"
+    "where -> renormalise) instead of passing the dense affinities as an input. The\n"
+    "model does it in-graph; a standalone graph that takes affinities as an input\n"
+    "compiles fine, so this isolates the upstream masking.",
+)
+parser.add_argument(
     "--share-weights",
     action="store_true",
     help="Reuse one expert weight set across instances, separating instance count "
@@ -205,16 +213,31 @@ def main() -> None:
         )
         return output[0] if isinstance(output, tuple) else output
 
+    def _router(tokens_d, gate_d):
+        """The model's router, as a graph: fp32 softmax -> top-k threshold -> renormalise."""
+        logits_d = torch.matmul(tokens_d.to(torch.float32), gate_d)
+        probs_d = torch.softmax(logits_d, dim=-1)
+        threshold_d = torch.topk(probs_d, TOP_K, dim=-1).values[..., -1:]
+        dense_d = torch.where(probs_d >= threshold_d, probs_d, torch.zeros_like(probs_d))
+        dense_d = dense_d / dense_d.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        return dense_d[:, :num_local_experts].to(tokens_d.dtype)
+
     def moe(hidden_d, affinities_d, padding_mask_d, *weight_tensors):
         # Chain the calls so none can be eliminated: each instance consumes the previous
         # output. One instance is the standalone case; 32 is what the model's fused
         # denoise graph asks the compiler for, and that graph does not execute.
         out = hidden_d
+        gate_d = weight_tensors[-1] if args.router_in_graph else None
         for index in range(n):
             offset = 0 if args.share_weights else 2 * index
+            affinities = (
+                _router(out.to(hidden_d.dtype), gate_d)
+                if args.router_in_graph
+                else affinities_d
+            )
             out = _one_moe(
                 out.to(hidden_d.dtype),
-                affinities_d,
+                affinities,
                 weight_tensors[offset],
                 weight_tensors[offset + 1],
                 padding_mask_d,
@@ -229,6 +252,11 @@ def main() -> None:
     device_weights = []
     for gate_up, down in weight_sets:
         device_weights.extend((gate_up.to(device), down.to(device)))
+    if args.router_in_graph:
+        # Router weight last, so the chain can pick it off the end.
+        gate_weight = torch.randn(HIDDEN, NUM_EXPERTS, dtype=torch.float32) * 0.02
+        device_weights.append(gate_weight.to(device))
+        print("router computed inside the graph")
 
     compiled = _compile(moe, f"hunyuan_check_moe_cte_x{n}")
     actual = compiled(
@@ -242,6 +270,10 @@ def main() -> None:
     print(f"executed {n} chained instance(s); output {tuple(actual.shape)}")
     if not bool(torch.isfinite(actual).all()):
         raise SystemExit("FAIL: output contains non-finite values")
+
+    if args.router_in_graph:
+        print("OK (router-in-graph compile/execute check; numerics need the host router)")
+        return
 
     if n > 1:
         # Chaining bf16 MoE outputs compounds rounding, so the numeric check is the
