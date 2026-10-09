@@ -196,19 +196,25 @@ def _ref_forward(weights, config, inputs_embeds, cos_full, sin_full, attn_mask):
 
 
 def _init_single_rank_parallel() -> None:
+    """Bring up a one-rank TP group so the backbone's size queries resolve."""
     import vllm_omni_neuron.bootstrap  # noqa: F401
+    from vllm.config import VllmConfig, set_current_vllm_config
     from vllm.distributed import (
         init_distributed_environment,
         initialize_model_parallel,
     )
 
-    if not torch.distributed.is_initialized():
-        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-        os.environ.setdefault("MASTER_PORT", "29571")
-        init_distributed_environment(
-            world_size=1, rank=0, local_rank=0, backend="gloo"
-        )
-        initialize_model_parallel(tensor_model_parallel_size=1)
+    if torch.distributed.is_initialized():
+        return
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29571")
+    init_distributed_environment(world_size=1, rank=0, local_rank=0, backend="gloo")
+    # initialize_model_parallel reads the ambient vLLM config; keep the context open
+    # for the rest of the process so the groups stay valid.
+    context = set_current_vllm_config(VllmConfig())
+    context.__enter__()
+    _init_single_rank_parallel._context = context  # keep a reference alive
+    initialize_model_parallel(tensor_model_parallel_size=1)
 
 
 def test_prefill_denoise_split_matches_reference() -> None:
