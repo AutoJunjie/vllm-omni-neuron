@@ -172,6 +172,28 @@ the attention-mask decomposition. It runs on CPU at TP1:
 VLLM_NEURON_CPU_MODE=1 python test/unit/test_hunyuan_image3_numerics.py
 ```
 
+Its measured relative error against the reference forward is 7.07e-08 — float32
+round-off, so the ported math is exact.
+
+`test/unit/test_hunyuan_image3_sharding.py` covers what TP1 cannot: it drives each
+weight loader rank by rank at TP16 and TP32 and asserts the shards tile the checkpoint in
+the order the forward assumes, including that each rank's query heads belong to the KV
+head it loaded (the replicated-KV grouping, which only matters when
+`num_key_value_heads < tp_size`).
+
+`examples/hunyuan_image3/check_nki_kernels.py` compiles each NKI kernel on its own, at
+the shapes the real model runs, and diffs it against the torch fallback. On device at
+TP32: `output_projection_cte` 1.96e-03 relative (BF16-level), `attention_cte` passing at
+the same tolerance.
+
+On device, end to end: a 1024x1024 50-step generation of
+`"A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra
+detailed"` at seed 42 produces a coherent image, through both the offline runner and the
+OpenAI chat endpoint, with byte-identical output. There is **no** image-quality benchmark
+score (no GEBench or equivalent) and no per-step comparison against a GPU run of the same
+checkpoint, so the correctness claim is "reference math reproduced, and the full pipeline
+generates what the prompt asks for" — not quality parity with the reference deployment.
+
 ## Known limits
 
 - One resolution per compiled graph. Changing height/width, `prefill_len`, the step
