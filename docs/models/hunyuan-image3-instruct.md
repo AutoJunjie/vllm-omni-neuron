@@ -129,18 +129,24 @@ Per-request stage timings are written to
 One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, `moe_kernel: torch`,
 CFG batch of 2 (`guidance_scale` 2.5).
 
-Steady state, measured through the OpenAI chat endpoint on a warm server:
+Steady state, from `pipeline_perf_metrics.json` on the third warm generation:
 
 | Stage | Seconds |
 | --- | --- |
-| Prompt prefill | 0.03 |
-| Denoise (50 steps) | 44.8 (**0.90 / step**) |
-| VAE decode (host, float32) | 25.3 |
-| End to end | 70.2 |
+| Prompt prefill | 0.05 |
+| Denoise (50 steps) | 44.75 (**0.895 / step**) |
+| VAE decode (host, float32) | 27.8 |
+| End to end | 72.7 |
 
-vLLM-Omni's `diffusion_benchmark_serving.py` over 4 sequential 1024x1024 / 50-step
-requests: 4/4 successful, 282.55 s wall, latency mean 70.64 s, median 70.68 s,
-P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105.
+Two independent benchmarks agree:
+
+- **This repo's own runner**, `examples/hunyuan_image3/run.py --profile --runs 3` (one
+  cold generation to build the NEFFs, then timed warm generations): **72.83 s** average,
+  72.53 s min, 73.24 s max. Its per-stage metrics are the table above.
+- **vLLM-Omni's `diffusion_benchmark_serving.py`** over 4 sequential requests against the
+  served endpoint: 4/4 successful, 282.55 s wall, latency mean **70.64 s**, median
+  70.68 s, P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105. The ~2 s gap is the
+  offline runner's per-request Python setup, which the server amortizes.
 
 The first request on a cold NEFF cache is much slower because `torch.compile` builds both
 graphs on their first call, inside the generation: 1963 s end to end, of which roughly
@@ -148,9 +154,11 @@ graphs on their first call, inside the generation: 1963 s end to end, of which r
 the container and only the first run ever pays it; a warm server then becomes healthy in
 about 90 seconds and its first request is already at steady state.
 
-The offline runner and the OpenAI chat endpoint produce **byte-identical** output for the
-same prompt, seed and step count (`sha256 f62b9113...` for the Mars-observatory prompt at
-seed 42), so the serving path adds no numerical divergence.
+Output is **byte-identical** (`sha256 f62b9113...` for the Mars-observatory prompt at
+seed 42) across all three axes that could have perturbed it: the offline runner vs the
+OpenAI chat endpoint, a cold NEFF build vs a warm cache, and two different physical
+`trn2.48xlarge` instances. So neither the serving path nor the compilation cache nor the
+host introduces numerical divergence.
 
 At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local experts
 densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs, and it
