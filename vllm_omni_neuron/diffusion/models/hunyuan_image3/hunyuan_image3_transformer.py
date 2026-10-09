@@ -299,7 +299,9 @@ def _hunyuan_o_proj(active, weight, bias):
 
 
 @nki.jit
-def _hunyuan_swiglu_mlp_kernel(hidden, gate_weight, up_weight, down_weight):
+def _hunyuan_swiglu_mlp_kernel(
+    hidden, gate_weight, up_weight, down_weight, gate_bias, up_bias, down_bias
+):
     """``down(silu(hidden @ gate) * (hidden @ up))`` for ``hidden`` ``[B, T, H]``.
 
     HunyuanImage3 stores one fused ``gate_and_up_proj`` whose first chunk is the
@@ -307,6 +309,10 @@ def _hunyuan_swiglu_mlp_kernel(hidden, gate_weight, up_weight, down_weight):
     (``down_proj(x1 * silu(x2))`` in the reference implementation), so the loader
     splits it into ``up_weight`` (chunk 0) and ``gate_weight`` (chunk 1) and this
     kernel's naming follows nkilib's ``act(gate) * up`` convention.
+
+    The model's projections are bias-free (``mlp_bias: false``), but the biases are
+    passed as zero tensors rather than ``None``: that is the call shape the Wan2.2
+    path exercises on this stack, and it costs nothing numerically.
     """
     return nkilib_mlp(
         hidden_tensor=hidden,
@@ -314,9 +320,9 @@ def _hunyuan_swiglu_mlp_kernel(hidden, gate_weight, up_weight, down_weight):
         up_proj_weights_tensor=up_weight,
         down_proj_weights_tensor=down_weight,
         normalization_weights_tensor=None,
-        gate_proj_bias_tensor=None,
-        up_proj_bias_tensor=None,
-        down_proj_bias_tensor=None,
+        gate_proj_bias_tensor=gate_bias,
+        up_proj_bias_tensor=up_bias,
+        down_proj_bias_tensor=down_bias,
         normalization_bias_tensor=None,
         fused_add_tensor=None,
         store_fused_add_result=False,
@@ -351,9 +357,12 @@ def _hunyuan_nki_swiglu_mlp(
     gate_weight: torch.Tensor,
     up_weight: torch.Tensor,
     down_weight: torch.Tensor,
+    gate_bias: torch.Tensor,
+    up_bias: torch.Tensor,
+    down_bias: torch.Tensor,
 ) -> torch.Tensor:
     return _wrap_nki_kernel(_hunyuan_swiglu_mlp_kernel)(
-        hidden, gate_weight, up_weight, down_weight
+        hidden, gate_weight, up_weight, down_weight, gate_bias, up_bias, down_bias
     )
 
 
@@ -388,10 +397,24 @@ def _can_use_swiglu_mlp_kernel(hidden, gate_weight) -> bool:
     return math.ceil(inner_dim / _MLP_SRC_PROJ_INT_DIM_TILE_SIZE) <= _MLP_NUM_HW_PSUM_BANKS
 
 
-def _hunyuan_swiglu_mlp(hidden, gate_weight, up_weight, down_weight, use_kernel: bool):
-    """SwiGLU MLP via the NKI kernel when allowed, else the equivalent torch math."""
-    if use_kernel and _can_use_swiglu_mlp_kernel(hidden, gate_weight):
-        return _hunyuan_nki_swiglu_mlp(hidden, gate_weight, up_weight, down_weight)
+def _hunyuan_swiglu_mlp(
+    hidden,
+    gate_weight,
+    up_weight,
+    down_weight,
+    use_kernel: bool,
+    zero_bias: tuple[torch.Tensor, torch.Tensor] | None = None,
+):
+    """SwiGLU MLP via the NKI kernel when allowed, else the equivalent torch math.
+
+    ``zero_bias`` carries the ``([1, I], [1, H])`` zero tensors the kernel's bias
+    arguments need; the torch path ignores them.
+    """
+    if use_kernel and zero_bias is not None and _can_use_swiglu_mlp_kernel(hidden, gate_weight):
+        inner_bias, outer_bias = zero_bias
+        return _hunyuan_nki_swiglu_mlp(
+            hidden, gate_weight, up_weight, down_weight, inner_bias, inner_bias, outer_bias
+        )
     gated = F.silu(torch.matmul(hidden, gate_weight)) * torch.matmul(hidden, up_weight)
     return torch.matmul(gated, down_weight)
 
@@ -703,6 +726,14 @@ class NeuronHunyuanMoE(nn.Module):
         self.expert_down_weight = nn.ParameterList(
             nn.Parameter(torch.empty(inter, hidden_size)) for _ in range(self.num_local_experts)
         )
+        # The nkilib MLP kernel always takes bias operands; these projections are
+        # bias-free, so carry constant zeros instead of branching in the graph.
+        self.register_buffer(
+            "expert_zero_bias_inner", torch.zeros(1, inter), persistent=False
+        )
+        self.register_buffer(
+            "zero_bias_outer", torch.zeros(1, hidden_size), persistent=False
+        )
 
         num_shared = getattr(config, "num_shared_expert", 0)
         if isinstance(num_shared, list):
@@ -724,6 +755,11 @@ class NeuronHunyuanMoE(nn.Module):
             )
             self.shared_down_weight = nn.Parameter(
                 torch.empty(self.shared_intermediate_size, hidden_size)
+            )
+            self.register_buffer(
+                "shared_zero_bias_inner",
+                torch.zeros(1, self.shared_intermediate_size),
+                persistent=False,
             )
 
     def _routing_weights(self, tokens: torch.Tensor) -> torch.Tensor:
@@ -764,6 +800,7 @@ class NeuronHunyuanMoE(nn.Module):
                 self.expert_up_weight[expert],
                 self.expert_down_weight[expert],
                 self.use_kernel,
+                (self.expert_zero_bias_inner, self.zero_bias_outer),
             )
             scaled = expert_out * weights[:, expert].reshape(1, -1, 1)
             output = scaled if output is None else output + scaled
@@ -775,6 +812,7 @@ class NeuronHunyuanMoE(nn.Module):
                 self.shared_up_weight,
                 self.shared_down_weight,
                 self.use_kernel,
+                (self.shared_zero_bias_inner, self.zero_bias_outer),
             )
             output = shared if output is None else output + shared
 
@@ -1069,12 +1107,21 @@ def expected_checkpoint_keys(transformer: NeuronHunyuanImage3Transformer) -> Ite
 
 
 def nki_mlp_enabled(model_config: dict | None) -> bool:
-    """Resolve the ``moe_kernel`` stage-config knob (``nki`` default, ``torch`` opt-out)."""
-    choice = str((model_config or {}).get("moe_kernel", "nki")).lower()
+    """Resolve the ``moe_kernel`` stage-config knob.
+
+    Defaults to ``torch``. The nkilib SwiGLU MLP launch is not yet validated on this
+    stack — its first on-device launch wedged a NeuronCore (see the model card's known
+    limits) — so it stays opt-in via ``moe_kernel: nki`` while the attention and
+    output-projection kernels, which are exercised by the Wan2.2 path, run by default.
+    """
+    choice = str((model_config or {}).get("moe_kernel", "torch")).lower()
     if choice not in ("nki", "torch"):
         raise ValueError(f"model_config.moe_kernel must be 'nki' or 'torch', got {choice!r}")
-    if choice == "torch":
-        logger.warning("HunyuanImage3 MoE: NKI MLP kernel disabled by model_config.moe_kernel")
+    if choice == "nki":
+        logger.warning(
+            "HunyuanImage3 MoE: using the nkilib SwiGLU MLP kernel, which is not yet "
+            "validated on this stack."
+        )
     return choice == "nki"
 
 

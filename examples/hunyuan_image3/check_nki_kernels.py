@@ -23,6 +23,9 @@ os.environ.setdefault("VLLM_NEURON_LIBTORCH_NEURONX_LITE", "1")
 os.environ.setdefault("VLLM_NEURON_DISABLE_GRAPH_CAPTURE_BACKEND", "1")
 os.environ.setdefault("NEURON_CC_FLAGS", "-O1 --hbm-scratchpad-page-size=2048")
 os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
+# A runaway kernel should fail the execution rather than wedge the core: on HyperPod a
+# hung NeuronCore gets the whole node replaced within seconds.
+os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "120")
 
 import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
@@ -46,6 +49,12 @@ parser.add_argument("--tp-size", type=int, default=32, help="TP degree the shape
 parser.add_argument("--tokens", type=int, default=8194, help="CFG batch x (1 + image tokens)")
 parser.add_argument("--prefill-len", type=int, default=512)
 parser.add_argument("--tolerance", type=float, default=2e-2)
+parser.add_argument(
+    "--only",
+    default="o_proj,attention,mlp",
+    help="Comma-separated subset of o_proj,attention,mlp. The MLP kernel can wedge a\n"
+    "NeuronCore, so run it on its own once the others are known good.",
+)
 args = parser.parse_args()
 
 HIDDEN = 4096
@@ -94,13 +103,20 @@ def check_swiglu_mlp(device) -> dict[str, float]:
     gate_w = torch.randn(HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
     up_w = torch.randn(HIDDEN, MOE_INTERMEDIATE, dtype=torch.bfloat16) * 0.02
     down_w = torch.randn(MOE_INTERMEDIATE, HIDDEN, dtype=torch.bfloat16) * 0.02
+    inner_bias = torch.zeros(1, MOE_INTERMEDIATE, dtype=torch.bfloat16)
+    outer_bias = torch.zeros(1, HIDDEN, dtype=torch.bfloat16)
 
-    def kernel(h, g, u, d):
-        return hyt._hunyuan_nki_swiglu_mlp(h, g, u, d)
+    def kernel(h, g, u, d, bi, bo):
+        return hyt._hunyuan_nki_swiglu_mlp(h, g, u, d, bi, bi, bo)
 
     compiled = _compile(kernel, "hunyuan_check_swiglu_mlp")
     actual = compiled(
-        hidden.to(device), gate_w.to(device), up_w.to(device), down_w.to(device)
+        hidden.to(device),
+        gate_w.to(device),
+        up_w.to(device),
+        down_w.to(device),
+        inner_bias.to(device),
+        outer_bias.to(device),
     ).to("cpu")
 
     hidden_f = hidden.float()
@@ -176,22 +192,37 @@ def main() -> None:
     device = _device()
     print(f"device={device} tp_size={args.tp_size} tokens={args.tokens}")
 
-    results: dict[str, float] = {}
-    # Report each check as it lands: a later kernel failing should not hide the
-    # earlier ones' numbers.
-    for check in (check_output_projection, check_causal_attention, check_swiglu_mlp):
-        partial = check(device)
-        results.update(partial)
-        for name, error in partial.items():
-            print(f"  {name:34s} {error:.4e}")
+    selected = [name.strip() for name in args.only.split(",") if name.strip()]
+    checks = {
+        "o_proj": check_output_projection,
+        "attention": check_causal_attention,
+        "mlp": check_swiglu_mlp,
+    }
+    unknown = set(selected) - set(checks)
+    if unknown:
+        raise SystemExit(f"unknown --only entries: {sorted(unknown)}")
 
-    mlp_gate = results["activation_on_gate_operand"]
-    mlp_up = results["activation_on_up_operand"]
-    convention = "gate operand" if mlp_gate < mlp_up else "up operand"
-    print(
-        f"\nnkilib applies the activation to the {convention}; the plugin passes the "
-        "checkpoint's second gate_and_up_proj chunk as `gate`."
-    )
+    results: dict[str, float] = {}
+    # Report each check as it lands: a later kernel failing (or hanging) should not hide
+    # the numbers the earlier ones already produced.
+    for name in selected:
+        partial = checks[name](device)
+        results.update(partial)
+        for key, error in partial.items():
+            print(f"  {key:34s} {error:.4e}", flush=True)
+
+    mlp_errors = [
+        results[key]
+        for key in ("activation_on_gate_operand", "activation_on_up_operand")
+        if key in results
+    ]
+    if mlp_errors:
+        gate_error, up_error = mlp_errors
+        convention = "gate operand" if gate_error < up_error else "up operand"
+        print(
+            f"\nnkilib applies the activation to the {convention}; the plugin passes the "
+            "checkpoint's second gate_and_up_proj chunk as `gate`."
+        )
 
     failures = {
         name: error
@@ -199,8 +230,8 @@ def main() -> None:
         if name not in ("activation_on_gate_operand", "activation_on_up_operand")
         and error > args.tolerance
     }
-    if min(mlp_gate, mlp_up) > args.tolerance:
-        failures["swiglu_mlp"] = min(mlp_gate, mlp_up)
+    if mlp_errors and min(mlp_errors) > args.tolerance:
+        failures["swiglu_mlp"] = min(mlp_errors)
     if failures:
         raise SystemExit(f"FAIL: {failures} (tolerance {args.tolerance})")
     print("OK")
