@@ -186,7 +186,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         HunyuanImage3PreTrainedModel.__init__(self, self.hf_config)
         self.generation_config = GenerationConfig.from_pretrained(od_config.model)
         self.od_config = od_config
-        self.device = get_local_device()
+        # PreTrainedModel exposes `device` as a read-only property derived from the
+        # parameters; this pipeline spans two devices (backbone on Neuron, embedding
+        # and VAE on host), so pin it to this rank's core explicitly.
+        self._device = get_local_device()
         self.weights_sources = [
             DiffusersPipelineLoader.ComponentSource(
                 model_or_path=od_config.model,
@@ -290,6 +293,11 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             time_shift_type="exponential",
             stochastic_sampling=False,
         )
+
+    @property
+    def device(self) -> torch.device:
+        """This rank's NeuronCore (overrides PreTrainedModel's parameter-derived property)."""
+        return self._device
 
     @property
     def transformer(self):
