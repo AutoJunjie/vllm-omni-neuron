@@ -754,7 +754,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         self._current_timestep = None
 
         decode_start = time.perf_counter()
-        image = self._decode(latents, generator)
+        # Only the rank whose output the engine keeps needs pixels. Decoding on all 32
+        # ranks is pure duplicated work, and because the Lite worker pins
+        # torch.set_num_threads(1) they also contend for the host instead of sharing it.
+        image = self._decode(latents, generator) if self.is_output_rank else None
         self._stage_seconds = {
             "prefill_seconds": prefill_seconds,
             "denoise_seconds": denoise_seconds,
@@ -763,8 +766,22 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         return image
 
     def _decode(self, latents: torch.Tensor, generator):
+        """Decode latents to a PIL image on the host. Output rank only."""
         from diffusers.image_processor import VaeImageProcessor
 
+        # The Lite worker pins torch to one thread so N workers do not oversubscribe the
+        # host. Only this rank decodes, so give the convolutions the box for its duration.
+        previous_threads = torch.get_num_threads()
+        cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (
+            os.cpu_count() or 1
+        )
+        torch.set_num_threads(max(1, cpus))
+        try:
+            return self._decode_impl(latents, generator, VaeImageProcessor)
+        finally:
+            torch.set_num_threads(previous_threads)
+
+    def _decode_impl(self, latents: torch.Tensor, generator, VaeImageProcessor):
         vae_config = self.vae.config
         latents = latents.to(dtype=self.vae_dtype)
         if getattr(vae_config, "scaling_factor", None):
