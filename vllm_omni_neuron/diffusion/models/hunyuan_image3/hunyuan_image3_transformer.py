@@ -44,7 +44,12 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+import vllm_neuron.functional as NF
 from nkilib.core.attention.attention_cte import attention_cte
+from nkilib.core.moe.moe_cte.moe_cte import (
+    ExpertAffinityScaleMode,
+    MoECTEImplementation,
+)
 from nkilib.core.mlp.mlp import mlp as nkilib_mlp
 from nkilib.core.output_projection.output_projection_cte import output_projection_cte
 from nkilib.core.utils.common_types import (
@@ -379,6 +384,15 @@ _MLP_NUM_HW_PSUM_BANKS = 8
 NKI_GRID = 2
 
 
+# Measured on trn2 at H=4096 / I=3072: the kernel validates its own tile budget at trace
+# time and rejects anything above 256 tokens per launch with
+# "[NCC_INKI016] Kernel validation exception: Stack out of memory". The limit is on
+# batch * seq, so folding tokens into a wider, shorter batch does not help. That makes
+# this kernel unsuitable for the DiT's 8194-token step (33 launches per expert); the
+# routed MoE uses the blockwise CTE kernel instead, which blocks internally.
+_MLP_MAX_TOKENS_PER_LAUNCH = 256
+
+
 def _can_use_swiglu_mlp_kernel(hidden, gate_weight) -> bool:
     """Whether the nkilib MLP kernel can run for these ``[B, T, H]`` / ``[H, I]`` shapes."""
     if not can_run_kernel(hidden):
@@ -393,6 +407,8 @@ def _can_use_swiglu_mlp_kernel(hidden, gate_weight) -> bool:
         # TKG: the hidden dim is sharded across 2 cores, so H // 128 must be even.
         return h % 256 == 0
     if (b * t) % NKI_GRID != 0:
+        return False
+    if b * t > _MLP_MAX_TOKENS_PER_LAUNCH:
         return False
     return math.ceil(inner_dim / _MLP_SRC_PROJ_INT_DIM_TILE_SIZE) <= _MLP_NUM_HW_PSUM_BANKS
 
@@ -488,19 +504,6 @@ def _interleaved_qkv_loader(
     return SafetensorsWeightLoader(transform=transform)
 
 
-def _fused_chunk_loader(chunk: int, num_chunks: int) -> SafetensorsWeightLoader:
-    """Take one chunk of a fused ``[num_chunks * I, H]`` weight, transposed to ``[H, I]``."""
-
-    def transform(slices, rank):
-        assert len(slices) == 1
-        total = slices[0].get_shape()[0]
-        size = total // num_chunks
-        start = chunk * size
-        return slices[0][start : start + size, :].T
-
-    return SafetensorsWeightLoader(transform=transform)
-
-
 def _fused_chunk_sharded_loader(
     chunk: int, num_chunks: int, shard_size: int, num_shards: int
 ) -> SafetensorsWeightLoader:
@@ -512,6 +515,35 @@ def _fused_chunk_sharded_loader(
         size = total // num_chunks
         start = chunk * size + (rank % num_shards) * shard_size
         return slices[0][start : start + shard_size, :].T
+
+    return SafetensorsWeightLoader(transform=transform)
+
+
+def _stacked_gate_up_loader(intermediate_size: int) -> SafetensorsWeightLoader:
+    """Stack per-expert ``gate_and_up_proj`` into the kernel's ``[E, H, 2, I]`` layout.
+
+    Each checkpoint tensor is ``[2I, H]`` with the *linear* branch first and the *gated*
+    branch second (the reference computes ``down(chunk0 * silu(chunk1))``). The kernel's
+    length-2 axis is (gate, up) — index 0 is the branch the activation applies to — so
+    chunk 1 lands at index 0 and chunk 0 at index 1.
+    """
+
+    def transform(slices, rank):
+        experts = []
+        for slice_obj in slices:
+            up = slice_obj[:intermediate_size, :].T
+            gate = slice_obj[intermediate_size : 2 * intermediate_size, :].T
+            experts.append(torch.stack((gate, up), dim=1))
+        return torch.stack(experts, dim=0)
+
+    return SafetensorsWeightLoader(transform=transform)
+
+
+def _stacked_down_loader() -> SafetensorsWeightLoader:
+    """Stack per-expert ``down_proj`` ``[H, I]`` tensors into ``[E, I, H]``."""
+
+    def transform(slices, rank):
+        return torch.stack([slice_obj[:].T for slice_obj in slices], dim=0)
 
     return SafetensorsWeightLoader(transform=transform)
 
@@ -717,23 +749,20 @@ class NeuronHunyuanMoE(nn.Module):
         )
 
         inter = self.moe_intermediate_size
-        self.expert_gate_weight = nn.ParameterList(
-            nn.Parameter(torch.empty(hidden_size, inter)) for _ in range(self.num_local_experts)
+        # Stacked, in the layout the blockwise CTE MoE kernel consumes: gate and up
+        # fused on a length-2 axis (index 0 = gate, the branch the activation applies
+        # to; index 1 = up), and all local experts on the leading axis so the kernel can
+        # gather an expert's weights per block.
+        self.expert_gate_up_weight = nn.Parameter(
+            torch.empty(self.num_local_experts, hidden_size, 2, inter)
         )
-        self.expert_up_weight = nn.ParameterList(
-            nn.Parameter(torch.empty(hidden_size, inter)) for _ in range(self.num_local_experts)
+        self.expert_down_weight = nn.Parameter(
+            torch.empty(self.num_local_experts, inter, hidden_size)
         )
-        self.expert_down_weight = nn.ParameterList(
-            nn.Parameter(torch.empty(inter, hidden_size)) for _ in range(self.num_local_experts)
-        )
-        # The nkilib MLP kernel always takes bias operands; these projections are
-        # bias-free, so carry constant zeros instead of branching in the graph.
-        self.register_buffer(
-            "expert_zero_bias_inner", torch.zeros(1, inter), persistent=False
-        )
-        self.register_buffer(
-            "zero_bias_outer", torch.zeros(1, hidden_size), persistent=False
-        )
+        # Tokens per kernel block. The kernel addresses tokens in 128-row tiles and
+        # reads past the last live token for padding slots, so the token buffers are
+        # padded up to a multiple of this.
+        self.block_size = 256
 
         num_shared = getattr(config, "num_shared_expert", 0)
         if isinstance(num_shared, list):
@@ -756,11 +785,6 @@ class NeuronHunyuanMoE(nn.Module):
             self.shared_down_weight = nn.Parameter(
                 torch.empty(self.shared_intermediate_size, hidden_size)
             )
-            self.register_buffer(
-                "shared_zero_bias_inner",
-                torch.zeros(1, self.shared_intermediate_size),
-                persistent=False,
-            )
 
     def _routing_weights(self, tokens: torch.Tensor) -> torch.Tensor:
         """Dense ``[T, num_local_experts]`` routing weights for this rank's experts."""
@@ -778,46 +802,96 @@ class NeuronHunyuanMoE(nn.Module):
             :, self.local_expert_start : self.local_expert_start + self.num_local_experts
         ]
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        bsz, seq, hidden = hidden_states.shape
-        tokens = hidden_states.reshape(1, bsz * seq, hidden)
-        weights = self._routing_weights(tokens[0]).to(hidden_states.dtype)
+    def _routed_experts_kernel(self, tokens: torch.Tensor, weights: torch.Tensor):
+        """Routed experts via the blockwise CTE MoE kernel.
 
-        # The MLP is token-wise, so a padding row cannot affect a live one. Pad to the
-        # NKI grid so an odd token count (a single CFG branch: 1 + 4096 image tokens)
-        # still takes the kernel instead of the torch fallback. Mirrors Wan's FFN.
-        live_tokens = tokens.shape[1]
-        pad_tokens = -live_tokens % NKI_GRID
-        if pad_tokens:
-            tokens = F.pad(tokens, (0, 0, 0, pad_tokens))
-            weights = F.pad(weights, (0, 0, 0, pad_tokens))
+        ``weights`` is the dense ``[T, E_local]`` affinity matrix the router already
+        produces — zero for experts this token did not select — which is exactly what
+        ``build_blockwise_mapping`` consumes. The kernel then computes only the
+        (token, expert) pairs that are non-zero, so a top-8-of-64 router costs about an
+        eighth of evaluating every local expert densely.
 
+        Token buffers are padded to a whole number of blocks because the kernel reads
+        past the last live token when a block is partly filled; ``padding_mask`` keeps
+        those rows out of the routing, and the output is sliced back.
+        """
+        from vllm.distributed.parallel_state import get_tp_group as _get_tp_group
+
+        live = tokens.shape[0]
+        padded = -(-live // self.block_size) * self.block_size
+        if padded != live:
+            tokens = F.pad(tokens, (0, 0, 0, padded - live))
+            weights = F.pad(weights, (0, 0, 0, padded - live))
+        padding_mask = torch.zeros(padded, dtype=torch.bool, device=tokens.device)
+        padding_mask[:live] = True
+
+        (
+            affinities_masked,
+            token_position_to_id,
+            block_to_expert,
+            conditions,
+        ) = NF.build_blockwise_mapping(
+            expert_affinities=weights,
+            num_local_experts=self.num_local_experts,
+            num_experts_per_token=self.top_k,
+            block_size=self.block_size,
+            moe_group=_get_tp_group(),
+            # Pure expert parallelism: each rank owns whole experts, so the kernel
+            # needs no intra-expert sharding collectives.
+            tp_degree=1,
+            padding_mask=padding_mask,
+        )
+        output = NF.moe_cte(
+            implementation=MoECTEImplementation.shard_on_block,
+            conditions=conditions,
+            hidden_states=tokens,
+            expert_affinities_masked=affinities_masked,
+            gate_up_proj_weight=self.expert_gate_up_weight,
+            down_proj_weight=self.expert_down_weight,
+            activation_function=ActFnType.SiLU,
+            block_size=self.block_size,
+            token_position_to_id=token_position_to_id.to(dtype=torch.int32),
+            block_to_expert=block_to_expert.to(dtype=torch.int32),
+            expert_affinities_scaling_mode=ExpertAffinityScaleMode.POST_SCALE,
+            skip_token=True,
+            is_tensor_update_accumulating=True,
+        )
+        if isinstance(output, tuple):
+            output = output[0]
+        return output[:live]
+
+    def _routed_experts_torch(self, tokens: torch.Tensor, weights: torch.Tensor):
+        """Dense fallback: evaluate every local expert and scale by its affinity."""
         output = None
+        tokens_3d = tokens.unsqueeze(0)
         for expert in range(self.num_local_experts):
-            expert_out = _hunyuan_swiglu_mlp(
-                tokens,
-                self.expert_gate_weight[expert],
-                self.expert_up_weight[expert],
-                self.expert_down_weight[expert],
-                self.use_kernel,
-                (self.expert_zero_bias_inner, self.zero_bias_outer),
-            )
+            gate_w = self.expert_gate_up_weight[expert, :, 0, :]
+            up_w = self.expert_gate_up_weight[expert, :, 1, :]
+            gated = F.silu(torch.matmul(tokens_3d, gate_w)) * torch.matmul(tokens_3d, up_w)
+            expert_out = torch.matmul(gated, self.expert_down_weight[expert])
             scaled = expert_out * weights[:, expert].reshape(1, -1, 1)
             output = scaled if output is None else output + scaled
+        return output.squeeze(0)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        bsz, seq, hidden = hidden_states.shape
+        tokens = hidden_states.reshape(bsz * seq, hidden)
+        weights = self._routing_weights(tokens).to(hidden_states.dtype)
+
+        if self.use_kernel and can_run_kernel(tokens):
+            output = self._routed_experts_kernel(tokens, weights)
+        else:
+            output = self._routed_experts_torch(tokens, weights)
 
         if self.num_shared_expert:
-            shared = _hunyuan_swiglu_mlp(
-                tokens,
-                self.shared_gate_weight,
-                self.shared_up_weight,
-                self.shared_down_weight,
-                self.use_kernel,
-                (self.shared_zero_bias_inner, self.zero_bias_outer),
-            )
-            output = shared if output is None else output + shared
+            # The shared expert is dense by construction (one expert, every token), so
+            # it stays a pair of matmuls; its per-rank intermediate is small.
+            shared_tokens = tokens.unsqueeze(0)
+            gated = F.silu(
+                torch.matmul(shared_tokens, self.shared_gate_weight)
+            ) * torch.matmul(shared_tokens, self.shared_up_weight)
+            output = output + torch.matmul(gated, self.shared_down_weight).squeeze(0)
 
-        if pad_tokens:
-            output = output[:, :live_tokens]
         if self.tp_size > 1:
             dist.all_reduce(output, group=self.tp_group)
         return output.reshape(bsz, seq, hidden)
@@ -991,15 +1065,18 @@ class NeuronHunyuanImage3Transformer(nn.Module):
             )
             mappings[f"layers.{i}.mlp.gate_weight"] = f"{src}.mlp.gate.wg.weight"
             moe = self.layers[i].mlp
-            for local, expert in enumerate(
-                range(moe.local_expert_start, moe.local_expert_start + moe.num_local_experts)
-            ):
-                fused = f"{src}.mlp.experts.{expert}.gate_and_up_proj.weight"
-                mappings[f"layers.{i}.mlp.expert_up_weight.{local}"] = fused
-                mappings[f"layers.{i}.mlp.expert_gate_weight.{local}"] = fused
-                mappings[f"layers.{i}.mlp.expert_down_weight.{local}"] = (
-                    f"{src}.mlp.experts.{expert}.down_proj.weight"
-                )
+            local_experts = range(
+                moe.local_expert_start, moe.local_expert_start + moe.num_local_experts
+            )
+            # One parameter per group, fused across this rank's experts: the loader takes
+            # a list of checkpoint keys and stacks them.
+            mappings[f"layers.{i}.mlp.expert_gate_up_weight"] = [
+                f"{src}.mlp.experts.{expert}.gate_and_up_proj.weight"
+                for expert in local_experts
+            ]
+            mappings[f"layers.{i}.mlp.expert_down_weight"] = [
+                f"{src}.mlp.experts.{expert}.down_proj.weight" for expert in local_experts
+            ]
             if moe.num_shared_expert:
                 fused = f"{src}.mlp.shared_mlp.gate_and_up_proj.weight"
                 mappings[f"layers.{i}.mlp.shared_up_weight"] = fused
@@ -1044,12 +1121,11 @@ class NeuronHunyuanImage3Transformer(nn.Module):
 
             moe = layer.mlp
             set_weight_loader(moe.gate_weight, _transpose_loader())
-            for local in range(moe.num_local_experts):
-                # ``gate_and_up_proj`` is [up | gate]: the reference computes
-                # down(x1 * silu(x2)) over chunk 0 and chunk 1 respectively.
-                set_weight_loader(moe.expert_up_weight[local], _fused_chunk_loader(0, 2))
-                set_weight_loader(moe.expert_gate_weight[local], _fused_chunk_loader(1, 2))
-                set_weight_loader(moe.expert_down_weight[local], _transpose_loader())
+            set_weight_loader(
+                moe.expert_gate_up_weight,
+                _stacked_gate_up_loader(moe.moe_intermediate_size),
+            )
+            set_weight_loader(moe.expert_down_weight, _stacked_down_loader())
             if moe.num_shared_expert:
                 set_weight_loader(
                     moe.shared_up_weight,
@@ -1109,19 +1185,23 @@ def expected_checkpoint_keys(transformer: NeuronHunyuanImage3Transformer) -> Ite
 def nki_mlp_enabled(model_config: dict | None) -> bool:
     """Resolve the ``moe_kernel`` stage-config knob.
 
-    Defaults to ``torch``. The nkilib SwiGLU MLP launch is not yet validated on this
-    stack: the run that first launched it produced no result and did not continue (see the
-    model card's known limits — the cause is unproven). It stays opt-in via
-    ``moe_kernel: nki`` while the attention and output-projection kernels, which the
-    Wan2.2 path also exercises, run by default.
+    Defaults to ``nki``, which routes the MoE through the blockwise CTE MoE kernel
+    (``NF.moe_cte``). That kernel computes only the (token, expert) pairs the router
+    selected, so it both covers the dominant compute with NKI and drops roughly 8x of
+    the dense path's FLOPs for this model's top-8-of-64 routing. Measured against the
+    torch MoE math on device at the model's shapes: 7.4e-03 relative, BF16 level.
+
+    ``torch`` selects the dense fallback — every local expert evaluated for every token
+    — which is what the CPU numerics test exercises and what to switch to when bisecting
+    an accuracy regression.
     """
-    choice = str((model_config or {}).get("moe_kernel", "torch")).lower()
+    choice = str((model_config or {}).get("moe_kernel", "nki")).lower()
     if choice not in ("nki", "torch"):
         raise ValueError(f"model_config.moe_kernel must be 'nki' or 'torch', got {choice!r}")
-    if choice == "nki":
+    if choice == "torch":
         logger.warning(
-            "HunyuanImage3 MoE: using the nkilib SwiGLU MLP kernel, which is not yet "
-            "validated on this stack."
+            "HunyuanImage3 MoE: blockwise NKI kernel disabled; every local expert will "
+            "be evaluated densely for every token."
         )
     return choice == "nki"
 

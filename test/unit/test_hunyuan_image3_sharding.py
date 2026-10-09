@@ -27,9 +27,10 @@ os.environ.setdefault("VLLM_NEURON_CPU_MODE", "1")
 import torch  # noqa: E402
 
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (  # noqa: E402
-    _fused_chunk_loader,
     _fused_chunk_sharded_loader,
     _interleaved_qkv_loader,
+    _stacked_down_loader,
+    _stacked_gate_up_loader,
     _transpose_loader,
 )
 from vllm_neuron.utils.weight_loader import sharding_weight_loader  # noqa: E402
@@ -145,25 +146,56 @@ def test_o_proj_loader_matches_query_heads() -> None:
     print("o_proj loader OK")
 
 
-def test_fused_gate_up_chunking() -> None:
-    """chunk 0 is the linear branch, chunk 1 the gated one; shared MLP shards on top."""
-    fused = torch.cat(
-        (
-            torch.full((MOE_INTERMEDIATE, HIDDEN), 1.0),  # chunk 0 = up
-            torch.full((MOE_INTERMEDIATE, HIDDEN), 2.0),  # chunk 1 = gate
-        ),
-        dim=0,
-    )
-    up = _fused_chunk_loader(0, 2).load([FakeSlice(fused)], 0)
-    gate = _fused_chunk_loader(1, 2).load([FakeSlice(fused)], 0)
-    assert up.shape == (HIDDEN, MOE_INTERMEDIATE) and float(up.unique().item()) == 1.0
-    assert gate.shape == (HIDDEN, MOE_INTERMEDIATE) and float(gate.unique().item()) == 2.0
+def test_stacked_expert_loaders() -> None:
+    """Expert weights must land in the kernel's [E, H, 2, I] / [E, I, H] layout.
 
-    # Expert down_proj: [hidden, intermediate] -> [intermediate, hidden].
-    down = torch.arange(HIDDEN * MOE_INTERMEDIATE, dtype=torch.float32).reshape(
+    Two orderings have to be right at once and neither fails loudly: the checkpoint's
+    fused tensor is [up | gate] (the reference computes ``down(chunk0 * silu(chunk1))``)
+    while the kernel's length-2 axis is (gate, up) — index 0 is the branch the activation
+    applies to. Getting them crossed swaps SiLU onto the wrong projection.
+    """
+    experts = 2
+    gate_up_slices = []
+    down_slices = []
+    for expert in range(experts):
+        # Mark the branches distinguishably per expert: up = 10*e + 1, gate = 10*e + 2.
+        gate_up_slices.append(
+            FakeSlice(
+                torch.cat(
+                    (
+                        torch.full((MOE_INTERMEDIATE, HIDDEN), 10.0 * expert + 1.0),
+                        torch.full((MOE_INTERMEDIATE, HIDDEN), 10.0 * expert + 2.0),
+                    ),
+                    dim=0,
+                )
+            )
+        )
+        down_slices.append(
+            FakeSlice(torch.full((HIDDEN, MOE_INTERMEDIATE), 100.0 + expert))
+        )
+
+    stacked = _stacked_gate_up_loader(MOE_INTERMEDIATE).load(gate_up_slices, 0)
+    assert stacked.shape == (experts, HIDDEN, 2, MOE_INTERMEDIATE), stacked.shape
+    for expert in range(experts):
+        gate = stacked[expert, :, 0, :].unique()
+        up = stacked[expert, :, 1, :].unique()
+        assert gate.numel() == 1 and float(gate.item()) == 10.0 * expert + 2.0, (
+            f"expert {expert}: kernel index 0 must hold the gated branch (chunk 1)"
+        )
+        assert up.numel() == 1 and float(up.item()) == 10.0 * expert + 1.0, (
+            f"expert {expert}: kernel index 1 must hold the linear branch (chunk 0)"
+        )
+
+    down = _stacked_down_loader().load(down_slices, 0)
+    assert down.shape == (experts, MOE_INTERMEDIATE, HIDDEN), down.shape
+    for expert in range(experts):
+        assert float(down[expert].unique().item()) == 100.0 + expert
+
+    # Shared MLP down_proj: [hidden, intermediate] -> [intermediate, hidden].
+    shared_down = torch.arange(HIDDEN * MOE_INTERMEDIATE, dtype=torch.float32).reshape(
         HIDDEN, MOE_INTERMEDIATE
     )
-    assert torch.equal(_transpose_loader().load([FakeSlice(down)], 0), down.T)
+    assert torch.equal(_transpose_loader().load([FakeSlice(shared_down)], 0), shared_down.T)
 
     # Shared MLP: chunk, then shard the intermediate dim across ranks.
     marked = torch.cat(
@@ -188,11 +220,11 @@ def test_fused_gate_up_chunking() -> None:
                     f"tp{tp_size} chunk{chunk} rank{rank}: {shard[0][:4].tolist()} != "
                     f"{expected[:4].tolist()}"
                 )
-    print("gate_and_up_proj chunking OK")
+    print("stacked expert loaders OK")
 
 
 if __name__ == "__main__":
     test_interleaved_qkv_loader()
     test_o_proj_loader_matches_query_heads()
-    test_fused_gate_up_chunking()
+    test_stacked_expert_loaders()
     print("OK")
