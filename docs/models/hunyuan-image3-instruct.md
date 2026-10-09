@@ -207,13 +207,16 @@ generates what the prompt asks for" — not quality parity with the reference de
   FP8.
 - The VAE decode runs on the host in float32 on the output rank only, so it is neither
   accelerated nor parallel (28 s at 1024x1024).
-- The nkilib SwiGLU MLP kernel is not validated on this stack: the run that first
-  launched it produced no result and the NeuronCore stopped responding. The root cause is
-  not established — SBUF/PSUM budgeting is the first suspect, since this model's
-  intermediate size of 3072 keeps both the gate and up projections resident while the
-  Wan2.2 path runs `skip_gate_proj=True` with only one. Set `NEURON_RT_EXEC_TIMEOUT` (the
-  env profile defaults it to 600 s) before re-testing it, and on a managed cluster expect
-  the health agent to flag the node.
+- The nkilib SwiGLU MLP kernel is not validated on this stack. What was observed: the run
+  that first launched it produced no result and did not continue, and the managed node was
+  replaced shortly afterwards, which destroyed the state before the core could be
+  inspected. Whether the kernel itself stalled is therefore **unproven** — the only
+  evidence is the timing. SBUF/PSUM budgeting is the first thing to check, since this
+  model's intermediate size of 3072 keeps both the gate and up projections resident while
+  the Wan2.2 path runs `skip_gate_proj=True` with only one. Re-test with
+  `NEURON_RT_EXEC_TIMEOUT` set (the env profile defaults it to 600 s), node
+  auto-recovery disabled, and `--only mlp` so the process under suspicion is the only one
+  on the device.
 
 ## Related information
 

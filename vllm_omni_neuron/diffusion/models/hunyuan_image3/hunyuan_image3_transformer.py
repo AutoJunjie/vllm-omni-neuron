@@ -1110,9 +1110,10 @@ def nki_mlp_enabled(model_config: dict | None) -> bool:
     """Resolve the ``moe_kernel`` stage-config knob.
 
     Defaults to ``torch``. The nkilib SwiGLU MLP launch is not yet validated on this
-    stack — its first on-device launch wedged a NeuronCore (see the model card's known
-    limits) — so it stays opt-in via ``moe_kernel: nki`` while the attention and
-    output-projection kernels, which are exercised by the Wan2.2 path, run by default.
+    stack: the run that first launched it produced no result and did not continue (see the
+    model card's known limits — the cause is unproven). It stays opt-in via
+    ``moe_kernel: nki`` while the attention and output-projection kernels, which the
+    Wan2.2 path also exercises, run by default.
     """
     choice = str((model_config or {}).get("moe_kernel", "torch")).lower()
     if choice not in ("nki", "torch"):

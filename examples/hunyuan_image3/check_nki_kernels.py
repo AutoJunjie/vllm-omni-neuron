@@ -23,8 +23,8 @@ os.environ.setdefault("VLLM_NEURON_LIBTORCH_NEURONX_LITE", "1")
 os.environ.setdefault("VLLM_NEURON_DISABLE_GRAPH_CAPTURE_BACKEND", "1")
 os.environ.setdefault("NEURON_CC_FLAGS", "-O1 --hbm-scratchpad-page-size=2048")
 os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
-# A runaway kernel should fail the execution rather than wedge the core: on HyperPod a
-# hung NeuronCore gets the whole node replaced within seconds.
+# Bound every device execution: on a managed cluster an unresponsive core gets the whole
+# node replaced within seconds, which destroys the state you would debug from.
 os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "120")
 
 import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
@@ -52,8 +52,9 @@ parser.add_argument("--tolerance", type=float, default=2e-2)
 parser.add_argument(
     "--only",
     default="o_proj,attention,mlp",
-    help="Comma-separated subset of o_proj,attention,mlp. The MLP kernel can wedge a\n"
-    "NeuronCore, so run it on its own once the others are known good.",
+    help="Comma-separated subset of o_proj,attention,mlp. A run that first launched the\n"
+    "MLP kernel stopped producing output, so run it on its own once the others are\n"
+    "known good — then the process under suspicion is the only one on the device.",
 )
 args = parser.parse_args()
 
