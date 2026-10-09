@@ -206,6 +206,19 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         if config.img_proj_type != "unet":
             raise ValueError(f"Unsupported img_proj_type: {config.img_proj_type}")
 
+        # Bring-up / bisection knob: truncate the decoder stack. Weight loading, the
+        # compiled graphs and the host loop all follow it, so a 2-layer run exercises the
+        # whole path in minutes instead of a full cold compile. Output is meaningless.
+        if "num_layers" in model_config:
+            layers = int(model_config["num_layers"])
+            logger.warning(
+                "HunyuanImage3: truncating the decoder stack to %d of %d layers; "
+                "generated images are NOT meaningful.",
+                layers,
+                config.num_hidden_layers,
+            )
+            config.num_hidden_layers = layers
+
         self.model = NeuronHunyuanImage3Transformer(config, use_nki_mlp=use_nki_mlp)
 
         hidden_size = int(config.hidden_size)
