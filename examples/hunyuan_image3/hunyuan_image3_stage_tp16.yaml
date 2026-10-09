@@ -26,9 +26,11 @@ stage_args:
         # Prompt bucket. The prefill graph is compiled for this length and the prompt is
         # right-padded to it; a different value is a separate (one-off) compile.
         prefill_len: 512
-        # `nki` runs the routed and shared MLPs through the NKI-Lib SwiGLU kernel;
-        # `torch` falls back to plain matmuls (useful for bisecting accuracy).
-        moe_kernel: nki
+        # MoE MLP implementation. `torch` (default) uses plain matmuls; `nki` routes the
+        # routed and shared MLPs through the NKI-Lib SwiGLU kernel, whose first on-device
+        # launch wedged a NeuronCore on this stack, so it stays opt-in. The attention and
+        # output-projection NKI kernels run either way.
+        moe_kernel: torch
         # The VAE decodes on the host; float32 matches the reference decoder.
         vae_dtype: float32
       parallel_config:
