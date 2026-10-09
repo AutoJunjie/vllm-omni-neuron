@@ -713,13 +713,24 @@ class NeuronHunyuanMoE(nn.Module):
     static graph.
     """
 
-    def __init__(self, config, layer_idx: int, tp_size: int, tp_rank: int, tp_group, use_kernel: bool):
+    def __init__(
+        self,
+        config,
+        layer_idx: int,
+        tp_size: int,
+        tp_rank: int,
+        tp_group,
+        use_kernel: bool,
+        moe_group=None,
+    ):
         super().__init__()
         hidden_size = int(config.hidden_size)
         self.hidden_size = hidden_size
         self.tp_size = tp_size
         self.tp_group = tp_group
         self.use_kernel = use_kernel
+        # Single-rank group: pure EP needs no intra-expert sharding collectives.
+        self.moe_group = moe_group
 
         num_experts = config.num_experts
         self.num_experts = int(
@@ -815,8 +826,6 @@ class NeuronHunyuanMoE(nn.Module):
         past the last live token when a block is partly filled; ``padding_mask`` keeps
         those rows out of the routing, and the output is sliced back.
         """
-        from vllm.distributed.parallel_state import get_tp_group as _get_tp_group
-
         live = tokens.shape[0]
         padded = -(-live // self.block_size) * self.block_size
         if padded != live:
@@ -835,7 +844,7 @@ class NeuronHunyuanMoE(nn.Module):
             num_local_experts=self.num_local_experts,
             num_experts_per_token=self.top_k,
             block_size=self.block_size,
-            moe_group=_get_tp_group(),
+            moe_group=self.moe_group,
             # Pure expert parallelism: each rank owns whole experts, so the kernel
             # needs no intra-expert sharding collectives.
             tp_degree=1,
@@ -900,14 +909,25 @@ class NeuronHunyuanMoE(nn.Module):
 class NeuronHunyuanDecoderLayer(nn.Module):
     """Pre-norm decoder layer: RMSNorm -> attention -> residual -> RMSNorm -> MoE."""
 
-    def __init__(self, config, layer_idx: int, tp_size: int, tp_rank: int, tp_group, use_kernel: bool):
+    def __init__(
+        self,
+        config,
+        layer_idx: int,
+        tp_size: int,
+        tp_rank: int,
+        tp_group,
+        use_kernel: bool,
+        moe_group=None,
+    ):
         super().__init__()
         hidden_size = int(config.hidden_size)
         self.eps = float(config.rms_norm_eps)
         self.input_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.post_attention_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.self_attn = NeuronHunyuanAttention(config, tp_size, tp_group)
-        self.mlp = NeuronHunyuanMoE(config, layer_idx, tp_size, tp_rank, tp_group, use_kernel)
+        self.mlp = NeuronHunyuanMoE(
+            config, layer_idx, tp_size, tp_rank, tp_group, use_kernel, moe_group
+        )
 
     def forward_prefill(self, hidden_states, cos, sin):
         residual = hidden_states
@@ -952,6 +972,24 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         # compilation (otherwise: "replica id #N not seen in replica groups").
         register_replica_groups(tp_size=self.tp_size, cp_size=1)
 
+        # The blockwise MoE mapping builder takes the group that shards each expert's
+        # intermediate dimension. This backbone is pure expert parallelism — every rank
+        # owns whole experts — so that group is this rank alone, matching vllm-neuron's
+        # GPT-OSS note that "for pure EP it is a single-rank group (no sharding)".
+        # Passing the full TP group instead makes the builder emit collectives it does
+        # not need. new_group is collective, so every rank builds the whole partition.
+        self.moe_group = None
+        if dist.is_initialized():
+            import vllm.distributed.parallel_state as vllm_ps
+            from vllm_neuron import envs as neuron_envs
+
+            self.moe_group = vllm_ps.init_model_parallel_group(
+                group_ranks=[[rank] for rank in range(dist.get_world_size())],
+                local_rank=dist.get_rank(),
+                backend=neuron_envs.get_dist_backend(),
+                group_name="hunyuan_image3_moe_ep",
+            )
+
         skipped = int(getattr(config, "moe_layer_num_skipped", 0) or 0)
         if skipped:
             # Upstream builds a dense HunYuanMLP for layer_idx < moe_layer_num_skipped;
@@ -972,6 +1010,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 self.tp_rank,
                 self.tp_group,
                 use_nki_mlp,
+                self.moe_group,
             )
             for layer_idx in range(self.num_layers)
         )
