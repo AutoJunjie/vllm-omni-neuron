@@ -82,12 +82,25 @@ is ever dispatched to the device under the Lite runtime.
 | --- | --- | --- |
 | `attention_cte` (causal, d-major output) | prompt prefill attention | torch masked softmax |
 | `output_projection_cte` | every attention output projection | `matmul` + bias |
-| nkilib `mlp` (SwiGLU, `ActFnType.SiLU`) | every routed and shared expert | `silu(x @ gate) * (x @ up)` then `@ down` |
+| `moe_cte` (blockwise, `shard_on_block`) — **opt-in** | routed experts | every local expert, densely |
 
 Each kernel is gated on `can_run_kernel` and its own tiling limits, so CPU mode and
-fake-tensor tracing take the torch path. `model_config.moe_kernel: torch` forces the
-fallback for the MLPs, which is the first thing to try when bisecting an accuracy
-regression.
+fake-tensor tracing take the torch path.
+
+The MoE kernel is opt-in (`model_config.moe_kernel: nki`); the default runs the routed
+experts as dense matmuls because the 32-layer graph does not yet execute (see
+[Known limits](#known-limits)). Two kernels were evaluated for the MoE and only one is
+viable:
+
+- nkilib's dense **`mlp`** (SwiGLU) is numerically correct — it is what confirmed that
+  nkilib applies the activation to the *gate* operand — but it validates its own tile
+  budget at trace time and rejects anything above **256 tokens per launch**
+  (`[NCC_INKI016] Stack out of memory`). The limit is on `batch * seq`, so folding the
+  tokens into a wider, shorter batch does not help. At 8194 tokens that is 33 launches
+  per expert, more overhead than the matmuls it would replace.
+- **`moe_cte`** blocks internally at `block_size`, so one call per layer covers the whole
+  step. It consumes the router's dense `[T, E_local]` affinities directly and computes
+  only the pairs the router selected.
 
 The denoise step's attention stays in torch on purpose: `attention_cte` takes no
 per-position mask, and that attention is around 1.5% of a layer's FLOPs next to the
@@ -161,11 +174,11 @@ OpenAI chat endpoint, a cold NEFF build vs a warm cache, and two different physi
 host introduces numerical divergence.
 
 At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local experts
-densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs, and it
-runs as plain matmuls because the nkilib SwiGLU kernel is disabled (see
-[Known limits](#known-limits)). Sparse expert dispatch and a working MLP kernel are the
-two levers worth pulling first. The host-side VAE decode is then the next largest term,
-at 36% of a warm request.
+densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs. The
+blockwise `moe_cte` kernel removes exactly that overhead and is already wired behind
+`moe_kernel: nki`; getting its 32-layer graph to execute is the single biggest lever
+here (see [Known limits](#known-limits)). The host-side VAE decode is the next largest
+term, at 36% of a warm request.
 
 ## Validation
 
@@ -215,16 +228,19 @@ generates what the prompt asks for" — not quality parity with the reference de
   FP8.
 - The VAE decode runs on the host in float32 on the output rank only, so it is neither
   accelerated nor parallel (28 s at 1024x1024).
-- The nkilib SwiGLU MLP kernel is not validated on this stack. What was observed: the run
-  that first launched it produced no result and did not continue, and the managed node was
-  replaced shortly afterwards, which destroyed the state before the core could be
-  inspected. Whether the kernel itself stalled is therefore **unproven** — the only
-  evidence is the timing. SBUF/PSUM budgeting is the first thing to check, since this
-  model's intermediate size of 3072 keeps both the gate and up projections resident while
-  the Wan2.2 path runs `skip_gate_proj=True` with only one. Re-test with
-  `NEURON_RT_EXEC_TIMEOUT` set (the env profile defaults it to 600 s), node
-  auto-recovery disabled, and `--only mlp` so the process under suspicion is the only one
-  on the device.
+- The routed MoE runs as dense matmuls. The blockwise `moe_cte` kernel is implemented and
+  wired behind `moe_kernel: nki`, and standalone on device at the model's shapes it
+  matches the torch MoE math to 7.4e-03 with 2087 of 16388 local (token, expert) pairs
+  live — but the full 32-layer graph compiles and then fails at execution with
+  `Failed to schedule neff execution. status=1 message=Unknown Failure`. One kernel
+  instance in a graph is fine; 32 are not, which points at a runtime resource limit (DMA
+  rings or scratchpad) rather than the kernel's math. Next step is a run with
+  `NEURON_RT_LOG_LEVEL=INFO` for the underlying NRT error. Iteration is cheap: each
+  layer's MoE collapses to one custom call, so this graph compiles in ~2 min rather than
+  the dense path's ~30.
+- An earlier report that the dense MLP kernel "wedged a NeuronCore" was wrong. It raises
+  a clean compile-time validation error; the node losses that coincided with it have a
+  separate explanation (a standing health-agent flag plus node auto-recovery).
 
 ## Related information
 
