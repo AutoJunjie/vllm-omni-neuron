@@ -149,6 +149,10 @@ VLLM_NEURON_CPU_MODE=1 python test/unit/test_hunyuan_image3_numerics.py
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
 - The VAE decode runs on the host in float32, so it is not accelerated.
+- The nkilib SwiGLU MLP kernel is not validated on this stack. On a managed cluster a
+  hung NeuronCore can get the whole instance replaced within seconds, so set
+  `NEURON_RT_EXEC_TIMEOUT` (the env profile defaults it to 600 s) and disable node
+  auto-recovery before re-testing it.
 
 ## Related information
 
