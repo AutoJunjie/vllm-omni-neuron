@@ -91,16 +91,17 @@ _REPLICATED_PREFIXES = (
 
 
 def _group_norm_f32(norm: nn.GroupNorm, x: torch.Tensor) -> torch.Tensor:
-    """GroupNorm in float32, then back to the input dtype.
+    """GroupNorm in float32, returning float32.
 
     The reference implementation runs these UNet blocks under
-    ``torch.autocast(bfloat16)``, which keeps normalisation layers in float32 and casts
-    only the convolutions down. Doing the same explicitly keeps the Neuron path's
-    numerics aligned with the GPU reference without an autocast context in the graph.
+    ``torch.autocast(bfloat16)``, which keeps normalisation on its float32 list and
+    casts back down only at the next convolution. Returning float32 here (and casting
+    at the conv call sites in :func:`_res_block`) reproduces that, so the adaptive-norm
+    modulation and the SiLU after it keep full precision as they do on GPU.
     """
     return F.group_norm(
         x.float(), norm.num_groups, norm.weight.float(), norm.bias.float(), norm.eps
-    ).to(x.dtype)
+    )
 
 
 def _res_block(block: ResBlock, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
@@ -109,18 +110,18 @@ def _res_block(block: ResBlock, x: torch.Tensor, emb: torch.Tensor) -> torch.Ten
         raise NotImplementedError(
             "HunyuanImage3 Neuron path expects patch_size=1 ResBlocks (no up/down sampling)"
         )
-    h = _group_norm_f32(block.in_layers[0], x)
-    h = F.silu(h)
-    h = block.in_layers[2](h)
+    conv_dtype = block.in_layers[2].weight.dtype
+    h = F.silu(_group_norm_f32(block.in_layers[0], x))
+    h = block.in_layers[2](h.to(conv_dtype))
 
     emb_out = block.emb_layers(emb)
     while emb_out.dim() < h.dim():
         emb_out = emb_out[..., None]
-    scale, shift = torch.chunk(emb_out, 2, dim=1)
+    scale, shift = torch.chunk(emb_out.float(), 2, dim=1)
 
     h = _group_norm_f32(block.out_layers[0], h) * (1.0 + scale) + shift
     h = F.silu(h)
-    h = block.out_layers[3](h)
+    h = block.out_layers[3](h.to(conv_dtype))
     return block.skip_connection(x) + h
 
 
@@ -130,9 +131,8 @@ def _apply_unet_module(module: nn.Module, x: torch.Tensor, emb: torch.Tensor) ->
         return _res_block(module, x, emb)
     if isinstance(module, nn.Sequential):
         # UNetUp's out_norm tail: [GroupNorm, SiLU, Conv2d].
-        x = _group_norm_f32(module[0], x)
-        x = F.silu(x)
-        return module[2](x)
+        x = F.silu(_group_norm_f32(module[0], x))
+        return module[2](x.to(module[2].weight.dtype))
     return module(x)
 
 
@@ -457,43 +457,54 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
 
     # ---- request preparation ----------------------------------------------
 
-    def _key_biases(self, attention_mask: torch.Tensor, prompt_len: int):
+    def _key_biases(self, attention_mask: torch.Tensor, prompt_len: int, image_len: int):
         """Derive the two additive key biases the denoise graph needs.
 
         ``attention_mask`` is upstream's ``[B, 1, S, S]`` boolean generation mask:
         lower-triangular, with a full-attention block over the generated-image span.
+        The denoise step's queries and keys are the ``image_len`` positions starting at
+        ``prompt_len`` — the timestep token followed by the ``<img>`` tokens. The
+        template emits more tokens after that span (``<eoi>``, then the answer/bot
+        suffixes), and those are *not* part of the step, exactly as upstream's
+        steady-state step drops them; so every slice below is bounded by
+        ``prompt_len + image_len`` rather than by the full sequence length.
+
         Row ``prompt_len`` is the timestep token and the rows after it are image tokens;
         both see the whole prompt, so each one's visibility over ``[prompt | image]``
         collapses to a single vector. Reading them out of the real mask — rather than
         assuming where the full-attention block starts — keeps this exact whichever side
         of the span the timestep token falls on.
         """
-        mask = attention_mask[0, 0].bool().cpu()
-        total = mask.shape[0]
+        total = attention_mask.shape[-1]
+        stop = prompt_len + image_len
+        if image_len <= 1 or stop > total:
+            raise ValueError(
+                f"Unexpected generation layout: prompt_len={prompt_len}, "
+                f"image_len={image_len}, total={total}"
+            )
+        mask = attention_mask[0, 0, prompt_len:stop, :stop].bool().cpu()
+
         # Only two mask rows are read; with CFG both batch rows must agree on them,
         # otherwise one branch would silently run with the other's visibility.
-        for row in (prompt_len, min(prompt_len + 1, total - 1)):
-            reference = attention_mask[0, 0, row].bool().cpu()
+        for row in (0, 1):
+            reference = mask[row]
             for branch in range(1, attention_mask.shape[0]):
-                if not bool(torch.all(attention_mask[branch, 0, row].bool().cpu() == reference)):
+                other = attention_mask[branch, 0, prompt_len + row, :stop].bool().cpu()
+                if not bool(torch.all(other == reference)):
                     raise ValueError(
                         "The Neuron HunyuanImage3 path requires the CFG branches to share "
-                        f"the generation mask (row {row} differs on branch {branch})."
+                        f"the generation mask (row {prompt_len + row} differs on branch "
+                        f"{branch})."
                     )
-        image_len = total - prompt_len
-        if image_len <= 1:
-            raise ValueError(
-                f"Unexpected generation layout: prompt_len={prompt_len} of total={total}"
-            )
 
-        image_rows = mask[prompt_len + 1 :]
+        image_rows = mask[1:]
         if not bool(torch.all(image_rows == image_rows[:1])):
             raise ValueError(
                 "The Neuron HunyuanImage3 path requires a uniform attention pattern "
                 "across generated image tokens."
             )
         image_row = image_rows[0]
-        timestep_row = mask[prompt_len]
+        timestep_row = mask[0]
         if not bool(torch.all(image_row[:prompt_len])) or not bool(
             torch.all(timestep_row[:prompt_len])
         ):
@@ -507,15 +518,14 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 (1, 1, 1, self.prefill_len + image_len), _MASK_BIAS, dtype=torch.float32
             )
             bias[..., :prompt_len] = 0.0
-            visible = row[prompt_len:]
             bias[0, 0, 0, self.prefill_len :] = torch.where(
-                visible,
+                row[prompt_len:],
                 torch.zeros((), dtype=torch.float32),
                 torch.full((), _MASK_BIAS, dtype=torch.float32),
             )
             return bias.to(self.device)
 
-        return build(timestep_row), build(image_row), image_len
+        return build(timestep_row), build(image_row)
 
     def _prompt_inputs(self, input_ids: torch.Tensor, cos, sin, prompt_len: int):
         """Right-pad the prompt to ``prefill_len`` and build its embeddings and RoPE.
@@ -659,16 +669,13 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         attention_mask = self._prepare_attention_mask_for_generation(
             input_ids, self.generation_config, model_kwargs=model_inputs
         )
-        timestep_key_bias, image_key_bias, image_len = self._key_biases(
-            attention_mask, prompt_len
+        # The denoise step covers the timestep token plus the <img> tokens, which is
+        # what `image_mask` marks; the template's trailing <eoi>/suffix tokens are not
+        # part of the step (upstream's steady-state step drops them too).
+        image_len = 1 + int(image_mask[0].sum().item())
+        timestep_key_bias, image_key_bias = self._key_biases(
+            attention_mask, prompt_len, image_len
         )
-        expected_image_len = 1 + int(image_mask[0].sum().item())
-        if image_len != expected_image_len:
-            raise ValueError(
-                f"The Neuron HunyuanImage3 path expects [timestep token] + image tokens "
-                f"({expected_image_len}), but the template produced {image_len} tokens "
-                "after the prompt (extra guidance/shape tokens are not supported)."
-            )
 
         cos, sin = self.get_pos_emb(model_inputs["custom_pos_emb"], model_inputs["position_ids"])
 

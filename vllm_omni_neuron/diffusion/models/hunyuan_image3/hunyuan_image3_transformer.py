@@ -198,7 +198,9 @@ def _prefill_attend(query, key, value, scale):
     scores = torch.matmul(scaled_query.float(), key.float().transpose(-2, -1))
     scores = scores.masked_fill(~causal, float("-inf"))
     attn = torch.softmax(scores, dim=-1)
-    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1)
+    # .contiguous(): the d-major result feeds the NKI o-projection, which needs a
+    # contiguous operand (the kernel gate can pass while this one fell back).
+    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1).contiguous()
 
 
 def _masked_attend(query, key, value, scale, key_bias):
@@ -213,7 +215,7 @@ def _masked_attend(query, key, value, scale, key_bias):
     if key_bias is not None:
         scores = scores + key_bias
     attn = torch.softmax(scores, dim=-1)
-    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1)
+    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1).contiguous()
 
 
 def _denoise_attend(query, key, value, scale, key_biases):
@@ -279,6 +281,8 @@ def _can_use_o_proj_kernel(active, weight, bias) -> bool:
         and h <= 16384 + 4321
         and b * s <= 128 * 1024
         and h % 2 == 0
+        # Same grid=2 batch x seq split as the MLP kernel.
+        and (b * s) % NKI_GRID == 0
     )
 
 
@@ -360,6 +364,12 @@ _MLP_SRC_PROJ_INT_DIM_TILE_SIZE = 512
 _MLP_NUM_HW_PSUM_BANKS = 8
 
 
+# The grid=2 launch splits the CTE path over batch x seq (it only shards the
+# intermediate dim when hidden_size >= 7168, and HunyuanImage3 is 4096), and the kernel
+# asserts that split is exact. Callers pad to NKI_GRID instead of silently falling back.
+NKI_GRID = 2
+
+
 def _can_use_swiglu_mlp_kernel(hidden, gate_weight) -> bool:
     """Whether the nkilib MLP kernel can run for these ``[B, T, H]`` / ``[H, I]`` shapes."""
     if not can_run_kernel(hidden):
@@ -373,6 +383,8 @@ def _can_use_swiglu_mlp_kernel(hidden, gate_weight) -> bool:
     if b * t <= _MLP_TKG_BS_SEQLEN_THRESHOLD:
         # TKG: the hidden dim is sharded across 2 cores, so H // 128 must be even.
         return h % 256 == 0
+    if (b * t) % NKI_GRID != 0:
+        return False
     return math.ceil(inner_dim / _MLP_SRC_PROJ_INT_DIM_TILE_SIZE) <= _MLP_NUM_HW_PSUM_BANKS
 
 
@@ -719,6 +731,10 @@ class NeuronHunyuanMoE(nn.Module):
         logits = torch.matmul(tokens.to(torch.float32), self.gate_weight)
         probs = torch.softmax(logits, dim=-1)
         threshold = torch.topk(probs, self.top_k, dim=-1).values[..., -1:]
+        # Threshold form rather than topk + scatter, so the whole block stays in one
+        # static graph. An exact tie at the k-th probability admits more than top_k
+        # experts (and renormalises over them); with a float32 softmax over 64 logits
+        # that is vanishingly rare, and the result is still a convex combination.
         dense = torch.where(probs >= threshold, probs, torch.zeros_like(probs))
         if self.norm_topk_prob and self.top_k > 1:
             dense = dense / dense.sum(dim=-1, keepdim=True).clamp(min=1e-8)
@@ -730,6 +746,15 @@ class NeuronHunyuanMoE(nn.Module):
         bsz, seq, hidden = hidden_states.shape
         tokens = hidden_states.reshape(1, bsz * seq, hidden)
         weights = self._routing_weights(tokens[0]).to(hidden_states.dtype)
+
+        # The MLP is token-wise, so a padding row cannot affect a live one. Pad to the
+        # NKI grid so an odd token count (a single CFG branch: 1 + 4096 image tokens)
+        # still takes the kernel instead of the torch fallback. Mirrors Wan's FFN.
+        live_tokens = tokens.shape[1]
+        pad_tokens = -live_tokens % NKI_GRID
+        if pad_tokens:
+            tokens = F.pad(tokens, (0, 0, 0, pad_tokens))
+            weights = F.pad(weights, (0, 0, 0, pad_tokens))
 
         output = None
         for expert in range(self.num_local_experts):
@@ -753,6 +778,8 @@ class NeuronHunyuanMoE(nn.Module):
             )
             output = shared if output is None else output + shared
 
+        if pad_tokens:
+            output = output[:, :live_tokens]
         if self.tp_size > 1:
             dist.all_reduce(output, group=self.tp_group)
         return output.reshape(bsz, seq, hidden)
@@ -813,6 +840,15 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         # compilation (otherwise: "replica id #N not seen in replica groups").
         register_replica_groups(tp_size=self.tp_size, cp_size=1)
 
+        skipped = int(getattr(config, "moe_layer_num_skipped", 0) or 0)
+        if skipped:
+            # Upstream builds a dense HunYuanMLP for layer_idx < moe_layer_num_skipped;
+            # this backbone builds MoE for every layer, so the mapping would ask for
+            # expert keys the checkpoint does not have.
+            raise NotImplementedError(
+                f"moe_layer_num_skipped={skipped} is not supported; every layer is "
+                "built as MoE."
+            )
         self.num_layers = int(config.num_hidden_layers)
         self.hidden_size = int(config.hidden_size)
         self.head_dim = int(config.attention_head_dim)

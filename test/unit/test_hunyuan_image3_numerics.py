@@ -233,7 +233,12 @@ def test_prefill_denoise_split_matches_reference() -> None:
     prompt_len = 5
     image_tokens = 4
     image_len = 1 + image_tokens  # timestep token + image tokens
-    seq = prompt_len + image_len
+    # The real template emits more tokens after the last <img>: <eoi>, then the
+    # answer/bot suffixes. They are NOT part of a denoise step (upstream's steady-state
+    # step drops them too), so the sequence here is longer than the step's span and the
+    # plugin must bound every slice by prompt_len + image_len rather than by `seq`.
+    trailing = 3
+    seq = prompt_len + image_len + trailing
     prefill_len = 7  # right-pads the prompt by 2
     bsz = 2
     hidden_size = config.hidden_size
@@ -243,7 +248,7 @@ def test_prefill_denoise_split_matches_reference() -> None:
     # (the timestep token at `prompt_len` stays causal — the stricter of the two
     # conventions, so the two-bias path is genuinely exercised).
     mask = torch.ones(seq, seq, dtype=torch.bool).tril()
-    image_slice = slice(prompt_len + 1, seq)
+    image_slice = slice(prompt_len + 1, prompt_len + image_len)
     mask[image_slice, image_slice] = True
 
     half = head_dim // 2
@@ -287,25 +292,26 @@ def test_prefill_denoise_split_matches_reference() -> None:
         bias = torch.full((1, 1, 1, total_keys), neg)
         bias[..., :prompt_len] = 0.0
         bias[0, 0, 0, prefill_len:] = torch.where(
-            row[prompt_len:], torch.zeros(()), torch.full((), neg)
+            row[prompt_len : prompt_len + image_len], torch.zeros(()), torch.full((), neg)
         )
         return bias
 
     timestep_bias = build_bias(mask[prompt_len])
     image_bias = build_bias(mask[prompt_len + 1])
 
-    step_cos = cos_half[prompt_len:].unsqueeze(0).expand(bsz, image_len, half).contiguous()
-    step_sin = sin_half[prompt_len:].unsqueeze(0).expand(bsz, image_len, half).contiguous()
+    step = slice(prompt_len, prompt_len + image_len)
+    step_cos = cos_half[step].unsqueeze(0).expand(bsz, image_len, half).contiguous()
+    step_sin = sin_half[step].unsqueeze(0).expand(bsz, image_len, half).contiguous()
     with torch.no_grad():
         actual = transformer.forward_denoise(
-            inputs[:, prompt_len:],
+            inputs[:, step],
             step_cos,
             step_sin,
             (timestep_bias, image_bias),
             *prompt_kv,
         )
 
-    expected = reference[:, prompt_len:]
+    expected = reference[:, step]
     error = (actual - expected).abs().max().item()
     scale = expected.abs().max().item()
     print(f"max abs error {error:.3e} (signal {scale:.3e}, relative {error / scale:.3e})")

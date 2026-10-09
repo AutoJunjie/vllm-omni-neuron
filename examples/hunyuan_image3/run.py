@@ -91,16 +91,33 @@ env_profiles.apply(
 )
 
 
-def _load_model_config(stage_cfg_path: str) -> dict:
+def _load_stage_args(stage_cfg_path: str) -> dict:
     with open(stage_cfg_path) as handle:
-        stage_cfg = yaml.safe_load(handle)
-    return dict(stage_cfg["stage_args"][0]["engine_args"].get("model_config") or {})
+        return yaml.safe_load(handle)["stage_args"][0]
+
+
+def _load_model_config(stage_cfg_path: str) -> dict:
+    return dict(_load_stage_args(stage_cfg_path)["engine_args"].get("model_config") or {})
+
+
+def _check_tensor_parallel_size(stage_cfg_path: str) -> None:
+    """--tensor-parallel-size only sizes the thread caps; the stage config owns the mesh."""
+    stage_args = _load_stage_args(stage_cfg_path)
+    configured = int(stage_args["engine_args"]["parallel_config"]["tensor_parallel_size"])
+    if configured != args.tensor_parallel_size:
+        raise SystemExit(
+            f"--tensor-parallel-size={args.tensor_parallel_size} disagrees with "
+            f"tensor_parallel_size={configured} in {stage_cfg_path}. The stage config "
+            "decides the mesh and the visible core range, so pass a matching "
+            "--stage-config (e.g. hunyuan_image3_stage_tp16.yaml for TP16)."
+        )
 
 
 def main() -> None:
     stage_cfg = args.stage_config or os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "hunyuan_image3_stage.yaml"
     )
+    _check_tensor_parallel_size(stage_cfg)
     model_config = _load_model_config(stage_cfg)
     if args.prefill_len is not None:
         model_config["prefill_len"] = args.prefill_len
