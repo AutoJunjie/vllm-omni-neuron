@@ -15,6 +15,7 @@ validation and performance benchmarking.
 |---|---|---|---|---|---|---|
 | Wan2.2 | T2V-A14B | Text to video | Trn2, Trn3 | ✅ | ✅ | In progress |
 | Wan2.2 | I2V-A14B | Image to video | Trn2, Trn3 | ✅ | ✅ | In progress |
+| HunyuanImage-3.0 | Instruct (DiT) | Text to image | Trn2 | CPU reference only | In progress | In progress |
 
 - **Correctness** — Accuracy validation passing (VBench and reference comparison)
 - **Perf Test** — Performance benchmark tests tracked across releases
@@ -141,6 +142,7 @@ Start with:
 - [Offline Wan2.2 quickstart](docs/getting-started/quickstart-offline-serving-wan22.md)
 - [Online Wan2.2 quickstart](docs/getting-started/quickstart-online-serving-wan22.md)
 - [Wan2.2 deployment tutorial](docs/tutorials/tutorial-wan22-14b.md)
+- [HunyuanImage-3.0-Instruct model card](docs/models/hunyuan-image3-instruct.md)
 - [Feature guide](docs/guides/features-guide.md)
 
 ## Version

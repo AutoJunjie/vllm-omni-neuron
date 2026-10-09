@@ -27,7 +27,7 @@ torch.nn.functional.gelu = torch.ops.aten.gelu.default
 
 parser = argparse.ArgumentParser(description="HunyuanImage-3.0-Instruct on Neuron")
 parser.add_argument("--dev", action="store_true", help="Dev mode: 2 denoising steps")
-parser.add_argument("--tensor-parallel-size", type=int, default=16)
+parser.add_argument("--tensor-parallel-size", type=int, default=32)
 parser.add_argument(
     "--model-path",
     type=str,
