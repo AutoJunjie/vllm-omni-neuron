@@ -55,6 +55,7 @@ os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "600")
 
 import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
+import torch.nn as nn  # noqa: E402
 
 torch.nn.functional.gelu = torch.ops.aten.gelu.default
 
@@ -81,8 +82,11 @@ parser.add_argument("--width", type=int, default=1024)
 parser.add_argument(
     "--dtype",
     default="float32",
-    choices=["float32", "bfloat16"],
-    help="Device dtype. The host reference is always float32.",
+    choices=["float32", "bfloat16", "float16"],
+    help="Device dtype. The host reference is always float32. float16 carries 10 mantissa "
+    "bits against bfloat16's 7, which addresses the precision this decoder lost in "
+    "bfloat16 -- at the cost of a much smaller range, and VAE decoders are the classic "
+    "float16 overflow case (diffusers ships force_upcast for exactly this).",
 )
 parser.add_argument("--runs", type=int, default=3, help="Timed runs on each side")
 parser.add_argument("--tolerance", type=float, default=2e-2)
@@ -121,6 +125,16 @@ parser.add_argument(
     help="Skip NKI dispatch for convolutions whose input depth is below this. Wan's VAE "
     "uses 2 on measured grounds; this decoder runs at D=1 until the first temporal "
     "upsample, so 1 routes conv_in and the mid blocks too.",
+)
+parser.add_argument(
+    "--fp32-norms",
+    action="store_true",
+    help="Run the decoder's GroupNorms in float32 while the convolutions stay in the "
+    "device dtype. This is what the reference implementation gets from running these "
+    "blocks under torch.autocast(bfloat16), which keeps normalisation on its float32 "
+    "list and casts back down at the next convolution -- the backbone already "
+    "reproduces it in _group_norm_f32, and the VAE decode did not. torch.autocast on "
+    "the neuron device cannot do it: that hook is a numeric no-op shim.",
 )
 parser.add_argument("--skip-device", action="store_true", help="Host reference only")
 args = parser.parse_args()
@@ -197,6 +211,30 @@ def _count_conv_splits(vae, latents):
     finally:
         ae.Conv3d.forward = original
     return stats
+
+
+def _install_fp32_norms(vae) -> int:
+    """Run every GroupNorm in ``vae.decoder`` in float32, returning float32.
+
+    Mirrors :func:`..._group_norm_f32` in the pipeline, which reproduces what the
+    reference gets from ``torch.autocast(bfloat16)``: normalisation stays in float32 and
+    only the next convolution casts back down. A GroupNorm computes a variance against
+    ``eps=1e-6``, which is below bfloat16's resolution at these magnitudes, so this is
+    the half of mixed precision that matters here.
+    """
+    import torch.nn.functional as F
+
+    def forward(self, x):
+        return F.group_norm(
+            x.float(), self.num_groups, self.weight.float(), self.bias.float(), self.eps
+        )
+
+    installed = 0
+    for module in vae.decoder.modules():
+        if isinstance(module, nn.GroupNorm):
+            module.forward = forward.__get__(module, type(module))
+            installed += 1
+    return installed
 
 
 def _relative_error(actual, expected):
@@ -415,6 +453,9 @@ def main() -> None:
 
     device_vae = _load_vae_weights(_build_vae(config, dtype), args.model_path, dtype)
     device_vae = device_vae.to(device)
+
+    if args.fp32_norms:
+        print(f"float32 GroupNorms: {_install_fp32_norms(device_vae)} installed")
 
     if args.nki_conv:
         from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import (
