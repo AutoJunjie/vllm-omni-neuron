@@ -145,18 +145,71 @@ parser.add_argument(
     "24 GiB -- which is why this is off by default. Only needed if a site has to fall "
     "back to torch, which cannot happen at 1024x1024 with --nki-min-d-out 1.",
 )
+parser.add_argument(
+    "--image",
+    default=None,
+    help="Encode this image on the host and decode its latents, instead of decoding "
+    "random noise. Random latents measure the numerics fine but decode to noise, so "
+    "nothing can be judged by eye; a real image round-trips to something comparable.",
+)
+parser.add_argument(
+    "--save-dir",
+    default=None,
+    help="Write the host float32 and device decodes here as PNGs.",
+)
 parser.add_argument("--skip-device", action="store_true", help="Host reference only")
 args = parser.parse_args()
 
 
-def _build_vae(config, dtype):
+def _encode_image(config, path, height, width):
+    """Encode a real image to latents on the host, in float32.
+
+    Uses the posterior mean, the deterministic mode. The encoder's output is the raw
+    latent the decoder consumes, so decoding it is a straight reconstruction -- no
+    scaling or shift factors, which the pipeline applies only around the diffusion.
+    """
+    import numpy as np
+    from PIL import Image
+
+    image = Image.open(path).convert("RGB")
+    if image.size != (width, height):
+        raise SystemExit(f"{path} is {image.size[0]}x{image.size[1]}, expected {width}x{height}")
+    pixels = torch.from_numpy(np.asarray(image).copy()).permute(2, 0, 1).float() / 127.5 - 1.0
+
+    encoder_vae = _load_vae_weights(
+        _build_vae(config, torch.float32, decoder_only=False), args.model_path, torch.float32
+    )
+    with torch.no_grad():
+        posterior = encoder_vae.encode(pixels[None], return_dict=False)[0]
+    latents = posterior.mean.contiguous()
+    del encoder_vae, posterior
+    gc.collect()
+    return latents
+
+
+def _save_png(decoded, path):
+    """Write a decoded ``(1, 3, T, H, W)`` tensor's image frame as a PNG.
+
+    Same conversion as the pipeline's ``_tensor_to_pil``: clamp to [-1, 1], map to
+    [0, 1], quantise to uint8.
+    """
+    import numpy as np
+    from PIL import Image
+
+    frame = decoded[0, :, -1].float().clamp(-1.0, 1.0)
+    frame = ((frame + 1.0) / 2.0 * 255.0).round().to(torch.uint8)
+    Image.fromarray(frame.permute(1, 2, 0).numpy().astype(np.uint8)).save(path)
+    print(f"saved {path}")
+
+
+def _build_vae(config, dtype, decoder_only=True):
     from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
 
     # Decoder only. The encoder is never called here and its weights are the same order
     # of magnitude as the decoder's, which matters because one logical NeuronCore has
     # 24 GB (96 GB per device / 4 cores) and the staged run hit nrt_tensor_allocate
     # status=4 -- device OOM -- allocating up2's 1.07 GB output.
-    vae = AutoencoderKLConv3D.from_config({**config.vae, "only_decoder": True})
+    vae = AutoencoderKLConv3D.from_config({**config.vae, "only_decoder": decoder_only})
     vae = vae.to(dtype).eval()
     # Inference only. Without this the compiled decode traces a backward pass and the
     # Lite backend rejects it with "neuron backend doesn't support events".
@@ -479,8 +532,8 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
         scale = reference.abs().max().item()
         error = (actual - reference).abs().max().item() / max(scale, 1e-12)
         print(f"relative max error vs host float32: {error:.4e} (signal {scale:.4e})")
-        return error
-    return None
+        return error, actual
+    return None, None
 
 
 def main() -> None:
@@ -500,8 +553,14 @@ def main() -> None:
         f"spatial tiling {'on' if args.tile else 'off'}"
     )
 
-    torch.manual_seed(0)
-    latents = torch.randn(shape, dtype=torch.float32)
+    if args.image:
+        latents = _encode_image(config, args.image, args.height, args.width)
+        if tuple(latents.shape) != shape:
+            raise SystemExit(f"encoded latents {tuple(latents.shape)}, expected {shape}")
+        print(f"latents encoded from {args.image}")
+    else:
+        torch.manual_seed(0)
+        latents = torch.randn(shape, dtype=torch.float32)
 
     host_vae = _load_vae_weights(_build_vae(config, torch.float32), args.model_path, torch.float32)
 
@@ -527,6 +586,9 @@ def main() -> None:
         host_times.append(time.perf_counter() - start)
     host_best = min(host_times)
     print(f"host float32 decode: best {host_best:.2f}s of {args.runs} -> {tuple(reference.shape)}")
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        _save_png(reference, os.path.join(args.save_dir, "host_float32.png"))
 
     if args.skip_device:
         return
@@ -571,7 +633,17 @@ def main() -> None:
     if args.stages:
         device_vae.requires_grad_(False)
         with torch.no_grad():
-            error = _run_staged(host_vae, device_vae, latents, dtype, device, reference)
+            error, actual = _run_staged(host_vae, device_vae, latents, dtype, device, reference)
+        if args.save_dir and actual is not None:
+            tag = f"device_{args.dtype}" + ("_fp32_reductions" if args.fp32_norms else "")
+            _save_png(actual, os.path.join(args.save_dir, f"{tag}.png"))
+            # Also in 8-bit pixel terms, which is what a viewer actually sees.
+            to_pixels = lambda t: ((t[0, :, -1].clamp(-1, 1) + 1) * 127.5).round()  # noqa: E731
+            diff = (to_pixels(actual) - to_pixels(reference)).abs()
+            print(
+                f"pixel difference vs host float32: max {diff.max().item():.0f}/255, "
+                f"mean {diff.mean().item():.3f}/255"
+            )
         if error is not None and error > args.tolerance:
             raise SystemExit(f"FAIL: {error:.4e} > tolerance {args.tolerance}")
         return
