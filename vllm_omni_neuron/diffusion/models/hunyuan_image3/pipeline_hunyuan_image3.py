@@ -207,6 +207,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         self.vae_dtype = getattr(torch, str(model_config.get("vae_dtype", "float32")))
         use_nki_mlp = nki_mlp_enabled(model_config)
         use_nki_attention = nki_attention_enabled(model_config)
+        moe_block_size = int(model_config.get("moe_block_size", 256))
 
         if config.img_proj_type != "unet":
             raise ValueError(f"Unsupported img_proj_type: {config.img_proj_type}")
@@ -225,7 +226,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             config.num_hidden_layers = layers
 
         self.model = NeuronHunyuanImage3Transformer(
-            config, use_nki_mlp=use_nki_mlp, use_nki_attention=use_nki_attention
+            config,
+            use_nki_mlp=use_nki_mlp,
+            use_nki_attention=use_nki_attention,
+            moe_block_size=moe_block_size,
         )
 
         hidden_size = int(config.hidden_size)

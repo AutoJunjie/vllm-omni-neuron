@@ -725,6 +725,7 @@ class NeuronHunyuanMoE(nn.Module):
         tp_group,
         use_kernel: bool,
         moe_group=None,
+        block_size: int = 256,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -775,8 +776,10 @@ class NeuronHunyuanMoE(nn.Module):
         )
         # Tokens per kernel block. The kernel addresses tokens in 128-row tiles and
         # reads past the last live token for padding slots, so the token buffers are
-        # padded up to a multiple of this.
-        self.block_size = 256
+        # padded up to a multiple of this. The mapping is sized for every
+        # (token, local expert) pair, so block_size sets the block count the kernel walks
+        # (T * E_local / block_size) and trades that against per-block padding.
+        self.block_size = int(block_size)
 
         num_shared = getattr(config, "num_shared_expert", 0)
         if isinstance(num_shared, list):
@@ -930,6 +933,7 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         use_kernel: bool,
         moe_group=None,
         use_attention_kernel: bool = True,
+        block_size: int = 256,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -940,7 +944,7 @@ class NeuronHunyuanDecoderLayer(nn.Module):
             config, tp_size, tp_group, use_attention_kernel
         )
         self.mlp = NeuronHunyuanMoE(
-            config, layer_idx, tp_size, tp_rank, tp_group, use_kernel, moe_group
+            config, layer_idx, tp_size, tp_rank, tp_group, use_kernel, moe_group, block_size
         )
 
     def forward_prefill(self, hidden_states, cos, sin):
@@ -974,7 +978,13 @@ class NeuronHunyuanImage3Transformer(nn.Module):
     ``key_bias`` that masks it.
     """
 
-    def __init__(self, config, use_nki_mlp: bool = True, use_nki_attention: bool = True):
+    def __init__(
+        self,
+        config,
+        use_nki_mlp: bool = True,
+        use_nki_attention: bool = True,
+        moe_block_size: int = 256,
+    ):
         super().__init__()
         self.config = config
         self.tp_size = get_tensor_model_parallel_world_size()
@@ -1026,6 +1036,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 use_nki_mlp,
                 self.moe_group,
                 use_nki_attention,
+                moe_block_size,
             )
             for layer_idx in range(self.num_layers)
         )
