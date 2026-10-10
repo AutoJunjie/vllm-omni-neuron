@@ -31,13 +31,13 @@ os.environ.setdefault("VLLM_NEURON_BACKEND", "neuron_native")
 os.environ.setdefault("VLLM_NEURON_LIBTORCH_NEURONX_LITE", "1")
 os.environ.setdefault("VLLM_NEURON_DISABLE_GRAPH_CAPTURE_BACKEND", "1")
 # The decoder graph is ~10.7M instructions, over the compiler's default 10M ceiling
-# (NCC_EVRF007). Raise it here as well as in compiler_args: NEURON_CC_FLAGS is what
-# the Lite backend actually passes through, so options["compiler_args"] alone was
-# ignored. Mirrors what the Wan2.2 VAE does.
-os.environ.setdefault(
-    "NEURON_CC_FLAGS",
-    "-O1 --hbm-scratchpad-page-size=2048 --internal-max-instruction-limit=15000000",
-)
+# (NCC_EVRF007). NEURON_CC_FLAGS is the channel the Lite backend actually passes through,
+# and setdefault is useless here because the launcher already exports it — so append the
+# raised limit to whatever is set. Mirrors what the Wan2.2 VAE does.
+_cc_flags = os.environ.get("NEURON_CC_FLAGS", "-O1 --hbm-scratchpad-page-size=2048")
+if "--internal-max-instruction-limit" not in _cc_flags:
+    _cc_flags += " --internal-max-instruction-limit=20000000"
+os.environ["NEURON_CC_FLAGS"] = _cc_flags
 os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
 os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "600")
 
@@ -213,7 +213,7 @@ def main() -> None:
             "compiler_args": [
                 "--model-type=unet-inference",
                 "--auto-cast=none",
-                "--internal-max-instruction-limit=15000000",
+                "--internal-max-instruction-limit=20000000",
                 "-O1",
                 "--hbm-scratchpad-page-size=2048",
             ],
