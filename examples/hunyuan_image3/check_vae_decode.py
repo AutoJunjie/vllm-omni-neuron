@@ -72,6 +72,14 @@ parser.add_argument(
     help="Count how many Conv3d calls take the >2 GB temporal-split path (which mutates "
     "module state and writes into slices — the pattern to avoid in a traced graph).",
 )
+parser.add_argument(
+    "--tile",
+    action="store_true",
+    help="Decode in spatial tiles. The whole-image graph is 10.7M instructions at\n"
+    "1024x1024 and 11.9M at 512x512 — over the compiler's 10M threshold either way,\n"
+    "with NCC_IXTP002 suggesting tiling. Tiling also forces fullgraph=False, since\n"
+    "boundary tiles have their own shapes and so recompile.",
+)
 parser.add_argument("--skip-device", action="store_true", help="Host reference only")
 args = parser.parse_args()
 
@@ -84,7 +92,7 @@ def _build_vae(config, dtype):
     # Inference only. Without this the compiled decode traces a backward pass and the
     # Lite backend rejects it with "neuron backend doesn't support events".
     vae.requires_grad_(False)
-    vae.use_spatial_tiling = False
+    vae.use_spatial_tiling = args.tile
     vae.use_temporal_tiling = False
     vae.use_slicing = False
     return vae
@@ -157,7 +165,10 @@ def main() -> None:
         args.height // int(downsample[0]),
         args.width // int(downsample[1]),
     )
-    print(f"latents {shape} -> image {args.height}x{args.width}, device dtype {args.dtype}")
+    print(
+        f"latents {shape} -> image {args.height}x{args.width}, device dtype {args.dtype}, "
+        f"spatial tiling {'on' if args.tile else 'off'}"
+    )
 
     torch.manual_seed(0)
     latents = torch.randn(shape, dtype=torch.float32)
@@ -206,7 +217,8 @@ def main() -> None:
     compiled = torch.compile(
         decode,
         backend=get_compile_backend_name(),
-        fullgraph=True,
+        # Tiling walks several tile shapes, so a graph break per shape is expected.
+        fullgraph=not args.tile,
         dynamic=False,
         options={
             "model_name": "hunyuan_image3_vae_decode",
