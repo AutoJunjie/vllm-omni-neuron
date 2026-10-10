@@ -223,26 +223,72 @@ def _count_conv_splits(vae, latents):
 
 
 def _install_fp32_norms(vae) -> int:
-    """Run every GroupNorm in ``vae.decoder`` in float32, returning float32.
+    """Compute every decoder GroupNorm's statistics in float32, output in the input dtype.
 
-    Mirrors :func:`..._group_norm_f32` in the pipeline, which reproduces what the
-    reference gets from ``torch.autocast(bfloat16)``: normalisation stays in float32 and
-    only the next convolution casts back down. A GroupNorm computes a variance against
-    ``eps=1e-6``, which is below bfloat16's resolution at these magnitudes, so this is
-    the half of mixed precision that matters here.
+    This is the half of ``torch.autocast`` that matters here, and the reason bfloat16
+    produced a garbage image: the failure is the *reduction*, not the mantissa. A single
+    convolution is only 3.2e-03 off in bfloat16, which 44 layers cannot compound into a
+    98% error; a GroupNorm can, twice over. Its last level reduces 4 channels x 4 frames
+    x 1024^2 ~ 16.8M elements, and a low-precision running sum stops absorbing new terms
+    once it exceeds them by ~256x, so the mean and variance come out badly wrong. And
+    computing the variance as ``E[x^2] - E[x]^2`` cancels catastrophically when the mean
+    dominates, which can drive it to zero or negative before ``rsqrt``.
+
+    So: accumulate in float32 via ``mean(dtype=torch.float32)``, which upcasts during the
+    reduction without materialising a float32 copy of ``x`` -- ``x.float()`` would add a
+    2.1 GiB temporary at the largest level, which is what put float32 out of memory in
+    the first place. Two passes rather than ``E[x^2] - E[x]^2``, with the centring done
+    in the input dtype: that rounds each term relative to its own magnitude, so the
+    residual bias on the variance is ~(7.8e-03)^2/3, negligible, where cancellation is
+    not. ``eps`` is added in float32, which also keeps it off float16's subnormal range
+    (1e-6 is below float16's smallest normal, 6.1e-5).
     """
-    import torch.nn.functional as F
 
     def forward(self, x):
-        return F.group_norm(
-            x.float(), self.num_groups, self.weight.float(), self.bias.float(), self.eps
-        )
+        shape = x.shape
+        batch, channels = shape[0], shape[1]
+        grouped = x.reshape(batch, self.num_groups, channels // self.num_groups, *shape[2:])
+        dims = tuple(range(2, grouped.dim()))
+
+        mean = grouped.mean(dim=dims, keepdim=True, dtype=torch.float32)
+        centred = grouped - mean.to(x.dtype)
+        variance = centred.pow(2).mean(dim=dims, keepdim=True, dtype=torch.float32)
+        scale = torch.rsqrt(variance + self.eps).to(x.dtype)
+
+        normalised = (centred * scale).reshape(shape)
+        affine_shape = (1, channels) + (1,) * (len(shape) - 2)
+        return normalised * self.weight.reshape(affine_shape).to(x.dtype) + self.bias.reshape(
+            affine_shape
+        ).to(x.dtype)
 
     installed = 0
     for module in vae.decoder.modules():
         if isinstance(module, nn.GroupNorm):
             module.forward = forward.__get__(module, type(module))
             installed += 1
+    return installed
+
+
+def _install_fp32_attention(vae) -> int:
+    """Run the mid block's attention wholly in float32.
+
+    Its softmax is another low-precision reduction, and whether the compiler accumulates
+    it in float32 is not something this side can confirm. The block runs at 64x64 on
+    1024 channels and the whole in+mid stage is 0.24 s of a 29 s decode, so buying
+    certainty here costs nothing worth measuring.
+    """
+    installed = 0
+    for module in vae.decoder.modules():
+        if type(module).__name__ != "AttnBlock":
+            continue
+        inner = module.forward
+
+        def forward(x, inner=inner, module=module):
+            return inner(x.float()).to(x.dtype)
+
+        module.float()
+        module.forward = forward
+        installed += 1
     return installed
 
 
@@ -359,6 +405,20 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
             # the end, with six other suspects.
             expected = boundaries[index + 1]
             got = out.to("cpu").float()
+            # float16 stores activations with a 65504 ceiling, so name an overflow at the
+            # stage that produced it rather than inferring it from a wrong image.
+            finite = torch.isfinite(got)
+            if not bool(finite.all()):
+                share = 1.0 - finite.float().mean().item()
+                print(
+                    f"  {name:<6} {best:6.2f}s  OVERFLOW: {share:.2%} of outputs are "
+                    f"inf/nan (max finite {got[finite].abs().max().item():.3e})"
+                )
+                rows.append((name, None))
+                carried = boundaries[index + 1].to(dtype).to(device)
+                del expected, got, finite, compiled
+                gc.collect()
+                continue
             stage_error = _relative_error(got, expected)
             # Also on the last temporal frame alone: that frame is the image, and maxing
             # over all four hides its error behind the larger early frames -- a 0.263
@@ -464,7 +524,10 @@ def main() -> None:
     device_vae = device_vae.to(device)
 
     if args.fp32_norms:
-        print(f"float32 GroupNorms: {_install_fp32_norms(device_vae)} installed")
+        print(
+            f"float32 reductions: {_install_fp32_norms(device_vae)} GroupNorm statistics, "
+            f"{_install_fp32_attention(device_vae)} attention block(s)"
+        )
 
     if args.nki_conv:
         from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import (
