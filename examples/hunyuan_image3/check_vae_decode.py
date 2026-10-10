@@ -268,13 +268,19 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
         try:
             start = time.perf_counter()
             out = compiled(carried)
+            out.to("cpu")  # execution is queued, so sync before calling the compile done
             compile_seconds = time.perf_counter() - start
-            times = []
+
+            # Device execution is asynchronous: timing each call on its own measures the
+            # enqueue, not the work (which is how a stage first reported 0.00s). Run the
+            # stage back to back and sync once at the end, so one transfer is amortised
+            # over every call instead of being counted in each.
+            start = time.perf_counter()
             for _ in range(args.runs):
-                start = time.perf_counter()
-                compiled(carried)
-                times.append(time.perf_counter() - start)
-            best = min(times)
+                last = compiled(carried)
+            last.to("cpu")
+            best = (time.perf_counter() - start) / args.runs
+
             print(
                 f"  {name:<6} {best:6.2f}s  (host {host_times[index]:.2f}s, "
                 f"{host_times[index] / best:.2f}x, compile {compile_seconds:.0f}s)"
