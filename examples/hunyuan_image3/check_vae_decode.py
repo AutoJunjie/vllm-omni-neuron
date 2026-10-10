@@ -199,6 +199,12 @@ def _count_conv_splits(vae, latents):
     return stats
 
 
+def _relative_error(actual, expected):
+    """Max absolute difference, relative to the signal it is measured against."""
+    scale = expected.abs().max().item()
+    return (actual - expected).abs().max().item() / max(scale, 1e-12)
+
+
 def _decoder_stages(vae):
     """Split ``vae.decoder.forward`` into sequential stages, in execution order.
 
@@ -306,12 +312,15 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
             # the end, with six other suspects.
             expected = boundaries[index + 1]
             got = out.to("cpu").float()
-            scale = expected.abs().max().item()
-            stage_error = (got - expected).abs().max().item() / max(scale, 1e-12)
+            stage_error = _relative_error(got, expected)
+            # Also on the last temporal frame alone: that frame is the image, and maxing
+            # over all four hides its error behind the larger early frames -- a 0.263
+            # all-frame error on the output stage was a 1.0265 error on the image.
+            frame_error = _relative_error(got[:, :, -1:], expected[:, :, -1:])
             print(
                 f"  {name:<6} {best:6.2f}s  (host {host_times[index]:.2f}s, "
                 f"{host_times[index] / best:.2f}x, compile {compile_seconds:.0f}s) "
-                f"err {stage_error:.2e}"
+                f"err {stage_error:.2e} frame {frame_error:.2e}"
             )
             del expected, got
             rows.append((name, best))
