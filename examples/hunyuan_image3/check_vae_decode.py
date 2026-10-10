@@ -32,6 +32,7 @@ one bites:
 """
 
 import argparse
+import gc
 import json
 import os
 import re
@@ -128,7 +129,11 @@ args = parser.parse_args()
 def _build_vae(config, dtype):
     from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
 
-    vae = AutoencoderKLConv3D.from_config(config.vae)
+    # Decoder only. The encoder is never called here and its weights are the same order
+    # of magnitude as the decoder's, which matters because one logical NeuronCore has
+    # 24 GB (96 GB per device / 4 cores) and the staged run hit nrt_tensor_allocate
+    # status=4 -- device OOM -- allocating up2's 1.07 GB output.
+    vae = AutoencoderKLConv3D.from_config({**config.vae, "only_decoder": True})
     vae = vae.to(dtype).eval()
     # Inference only. Without this the compiled decode traces a backward pass and the
     # Lite backend rejects it with "neuron backend doesn't support events".
@@ -301,14 +306,24 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
                 f"{host_times[index] / best:.2f}x, compile {compile_seconds:.0f}s)"
             )
             rows.append((name, best))
-            carried = out
+            previous, carried = carried, out
+            # Drop the finished stage's graph and its input: both hold device buffers,
+            # and nothing downstream reads them again.
+            del compiled, previous, last
+            gc.collect()
         except Exception as error:  # noqa: BLE001  one failure must not hide the rest
             count = _instruction_count(str(error))
             detail = f"{count:,} instructions" if count else str(error).splitlines()[0][:90]
             print(f"  {name:<6} FAILED   (host {host_times[index]:.2f}s) {detail}")
             rows.append((name, None))
             # Hand the successor the host activation so the map continues past the gap.
-            carried = boundaries[index + 1].to(dtype).to(device)
+            # This transfer can itself fail when the stage died of device OOM, which is
+            # how one stage's failure took the whole run down; stop mapping instead.
+            try:
+                carried = boundaries[index + 1].to(dtype).to(device)
+            except Exception as transfer_error:  # noqa: BLE001
+                print(f"         cannot continue past it: {transfer_error}")
+                break
 
     ran = [(name, best) for name, best in rows if best is not None]
     print(
