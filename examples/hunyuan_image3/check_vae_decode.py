@@ -74,6 +74,9 @@ def _build_vae(config, dtype):
 
     vae = AutoencoderKLConv3D.from_config(config.vae)
     vae = vae.to(dtype).eval()
+    # Inference only. Without this the compiled decode traces a backward pass and the
+    # Lite backend rejects it with "neuron backend doesn't support events".
+    vae.requires_grad_(False)
     vae.use_spatial_tiling = False
     vae.use_temporal_tiling = False
     vae.use_slicing = False
@@ -190,7 +193,8 @@ def main() -> None:
     device_vae = device_vae.to(device)
 
     def decode(z):
-        return device_vae.decode(z, return_dict=False)[0]
+        with torch.no_grad():
+            return device_vae.decode(z, return_dict=False)[0]
 
     compiled = torch.compile(
         decode,
