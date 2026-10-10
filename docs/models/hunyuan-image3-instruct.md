@@ -172,6 +172,31 @@ Two independent benchmarks agree:
   70.68 s, P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105. The ~2 s gap is the
   offline runner's per-request Python setup, which the server amortizes.
 
+### Against the NxDI port of the same model
+
+An earlier port of HunyuanImage-3.0 to the same `trn2.48xlarge` ran on NxDI with the cores
+split AR16 + DiT16 + VAE1, at the same 1024x1024 / 50 steps / CFG 2.5:
+
+| | NxDI port | This port (Lite) | |
+| --- | ---: | ---: | --- |
+| Denoise | 71.846 s (**1.437 / step**) | 44.754 s (**0.895 / step**) | **1.61x** |
+| VAE decode (host) | 27.461 s | 26-27.8 s | same |
+| End to end | 122.625 s | 72.10 s | 1.70x |
+
+Only the **denoise** row is a strict comparison, and it is the 1.61x. The end-to-end row
+is not like for like in two ways: the NxDI port spends 20.805 s generating 261 AR tokens
+on device for recaptioning, which this pipeline's causal prompt prefill (0.053 s) does not
+do; and its numbers are single functional requests, where these are three-run warm
+averages. So the honest claim is 1.61x on the phase both stacks compute the same way.
+
+The VAE row being identical is not a coincidence — the NxDI port tried to put the decoder
+on device too and hit the same wall, 11,377,628 instructions against the same 10,000,000
+`NeuronHloVerifier` ceiling (`evidence/nxdi-vae1024-compiler-limit.log` in the porting
+notes). Two independent stacks, twelve days apart, rejected by the same verifier at
+counts that differ only by graph construction. That is what makes this a property of the
+decoder rather than of how either stack traces it, and the per-stage split below is the
+approach the NxDI port did not try.
+
 The first request on a cold NEFF cache is much slower because `torch.compile` builds both
 graphs on their first call, inside the generation: 1963 s end to end, of which roughly
 30 minutes is compilation. Point `TORCH_NEURONX_NEFF_CACHE_DIR` at storage that outlives
@@ -211,6 +236,48 @@ saving is spent entirely on block bookkeeping.
 
 That leaves the host-side VAE decode as the largest remaining term, at 36% of a warm
 request.
+
+### Why the VAE decode stays on the host
+
+The decode is 29.2 s of float32 on the host at 1024x1024, and it is already using every
+core — 96 threads with no `OMP_NUM_THREADS` cap — so the only way to shrink it is to move
+it onto the device. `examples/hunyuan_image3/check_vae_decode.py` is that experiment. It
+loads the real VAE weights, decodes the pipeline's actual latent shape on the host as a
+reference, then compiles the same decode for Neuron and reports the error and the speedup.
+Its findings so far say the decoder does not fit:
+
+| Graph | Instructions | Ceiling |
+| --- | --- | --- |
+| whole decode, 1024x1024 (latent 64x64) | 10,746,838 | 10,000,000 |
+| whole decode, 512x512 (latent 32x32) | 11,852,476 | 10,000,000 |
+| one spatial tile, 384x384 (latent 24x24) | 17,488,800 | 10,000,000 |
+
+The count goes **up** as the spatial extent shrinks, so `NCC_IXTP002`'s advice ("Tiling
+could potentially do a better job") is backwards here: it tracks the decoder's op count
+and the per-op overhead at small spatial dims, not the data volume, and spatial tiling
+asks for 16 overlapping tiles of the worst shape. Tiling loses on the host for the same
+reason — 56.98 s tiled against 29.22 s whole. `--internal-max-instruction-limit` does not
+move the ceiling either: it is forwarded all the way to `walrus_driver`, but the rejection
+comes earlier, from `NeuronHloVerifier`.
+
+Splitting by **depth** rather than by area is the approach that holds up, because the
+decoder is a sequential chain and each stage then compiles as its own graph with a
+fraction of the ops at full spatial size (`--stages`). The host profile shows the cost is
+concentrated in the last three levels, which is also where the channel count is lowest:
+
+| Stage | Output | Host float32 | Device |
+| --- | --- | --- | --- |
+| `in+mid` | 1024 ch, 64x64 | 0.28 s | compiles |
+| `up0` | 1024 ch, 128x128 | 0.45 s | **14,155,776 instructions** |
+| `up1` | 512 ch, 256x256 | 2.13 s | compiles (40 min) |
+| `up2` | 256 ch, 512x512 | 5.55 s | measuring |
+| `up3` | 128 ch, 1024x1024 | 8.59 s | measuring |
+| `up4` | 128 ch, 1024x1024 | 11.10 s | measuring |
+| `out` | 3 ch, 1024x1024 | 1.08 s | measuring |
+
+So the one stage that will not compile, `up0`, is also one of the two cheapest (0.73 s of
+29.2 s between them), which is what makes a host/device split worth measuring rather than
+an all-or-nothing question.
 
 ## Validation
 
