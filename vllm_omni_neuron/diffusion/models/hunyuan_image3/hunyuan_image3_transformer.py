@@ -831,11 +831,19 @@ class NeuronHunyuanMoE(nn.Module):
         """
         live = tokens.shape[0]
         padded = -(-live // self.block_size) * self.block_size
-        if padded != live:
+        if padded == live:
+            # Nothing to mask: every row is a live token.
+            padding_mask = None
+        else:
             tokens = F.pad(tokens, (0, 0, 0, padded - live))
             weights = F.pad(weights, (0, 0, 0, padded - live))
-        padding_mask = torch.zeros(padded, dtype=torch.bool, device=tokens.device)
-        padding_mask[:live] = True
+            # Build the mask as a pure comparison rather than zeros + slice-assign. The
+            # in-graph mutation form made neuronx-cc's MaskPropagation pass fail with
+            # NCC_IMPR902 ("isl_set_union: spaces don't match"); this form carries the
+            # same values with no write into a freshly allocated tensor.
+            padding_mask = (
+                torch.arange(padded, device=tokens.device) < live
+            )
 
         (
             affinities_masked,
