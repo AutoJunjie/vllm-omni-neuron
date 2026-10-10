@@ -182,14 +182,14 @@ def _can_use_causal_attention_kernel(q, k, v) -> bool:
     return d <= _ATTN_MAX_HEAD_DIM
 
 
-def _prefill_attend(query, key, value, scale):
+def _prefill_attend(query, key, value, scale, use_kernel: bool = True):
     """Causal attention over ``[B, N, S, D]`` q/k/v, returning d-major ``[B, N, D, S]``.
 
     Q is pre-scaled so the kernel can run at ``scale=1.0``; the torch fallback folds the
     same scale into its float32 score matrix, and both softmax in float32.
     """
     scaled_query = query * scale
-    if _can_use_causal_attention_kernel(scaled_query, key, value):
+    if use_kernel and _can_use_causal_attention_kernel(scaled_query, key, value):
         b, n, s_q, d = scaled_query.shape
         out = _hunyuan_nki_causal_attention(
             scaled_query.reshape(b * n, s_q, d).contiguous(),
@@ -291,9 +291,9 @@ def _can_use_o_proj_kernel(active, weight, bias) -> bool:
     )
 
 
-def _hunyuan_o_proj(active, weight, bias):
+def _hunyuan_o_proj(active, weight, bias, use_kernel: bool = True):
     """``[B, N, D, S]`` attention output -> ``[B, S, H]`` via NKI, with a torch fallback."""
-    if _can_use_o_proj_kernel(active, weight, bias):
+    if use_kernel and _can_use_o_proj_kernel(active, weight, bias):
         return _hunyuan_nki_o_proj(active, weight, bias)
     b, n, d, s = active.shape
     x = active.reshape(b, n * d, s).transpose(1, 2)
@@ -602,8 +602,9 @@ class NeuronHunyuanAttention(nn.Module):
     upstream ``HunYuanAttention``.
     """
 
-    def __init__(self, config, tp_size: int, tp_group):
+    def __init__(self, config, tp_size: int, tp_group, use_kernel: bool = True):
         super().__init__()
+        self.use_kernel = use_kernel
         self.head_dim = int(config.attention_head_dim)
         self.total_num_heads = int(config.num_attention_heads)
         self.total_num_kv_heads = int(
@@ -673,6 +674,7 @@ class NeuronHunyuanAttention(nn.Module):
             attention_dmajor,
             self.o_proj_weight,
             self.o_proj_zero_bias,
+            self.use_kernel,
         )
         if self.tp_size > 1:
             dist.all_reduce(out, group=self.tp_group)
@@ -686,6 +688,7 @@ class NeuronHunyuanAttention(nn.Module):
             repeat_kv(key, self.num_kv_groups).transpose(1, 2),
             repeat_kv(value, self.num_kv_groups).transpose(1, 2),
             self.scale,
+            self.use_kernel,
         )
         return self._finish(attn), key, value
 
@@ -918,13 +921,16 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         tp_group,
         use_kernel: bool,
         moe_group=None,
+        use_attention_kernel: bool = True,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
         self.eps = float(config.rms_norm_eps)
         self.input_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.post_attention_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
-        self.self_attn = NeuronHunyuanAttention(config, tp_size, tp_group)
+        self.self_attn = NeuronHunyuanAttention(
+            config, tp_size, tp_group, use_attention_kernel
+        )
         self.mlp = NeuronHunyuanMoE(
             config, layer_idx, tp_size, tp_rank, tp_group, use_kernel, moe_group
         )
@@ -960,7 +966,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
     ``key_bias`` that masks it.
     """
 
-    def __init__(self, config, use_nki_mlp: bool = True):
+    def __init__(self, config, use_nki_mlp: bool = True, use_nki_attention: bool = True):
         super().__init__()
         self.config = config
         self.tp_size = get_tensor_model_parallel_world_size()
@@ -1011,6 +1017,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 self.tp_group,
                 use_nki_mlp,
                 self.moe_group,
+                use_nki_attention,
             )
             for layer_idx in range(self.num_layers)
         )
@@ -1242,6 +1249,27 @@ def nki_mlp_enabled(model_config: dict | None) -> bool:
         logger.warning(
             "HunyuanImage3 MoE: using the blockwise CTE NKI kernel, which is validated "
             "standalone but not yet in the full 32-layer graph."
+        )
+    return choice == "nki"
+
+
+def nki_attention_enabled(model_config: dict | None) -> bool:
+    """Resolve the ``attention_kernel`` stage-config knob (``nki`` default).
+
+    Exists mainly to bisect the two NKI families against each other: the MoE kernel
+    compiles on its own at every shape this model uses, but ICEs neuronx-cc when it
+    shares a graph with the rest of a decoder layer, and ``attention_cte`` plus
+    ``output_projection_cte`` are the other kernels in that graph.
+    """
+    choice = str((model_config or {}).get("attention_kernel", "nki")).lower()
+    if choice not in ("nki", "torch"):
+        raise ValueError(
+            f"model_config.attention_kernel must be 'nki' or 'torch', got {choice!r}"
+        )
+    if choice == "torch":
+        logger.warning(
+            "HunyuanImage3 attention: NKI kernels disabled; attention and the output "
+            "projection will run as torch ops."
         )
     return choice == "nki"
 

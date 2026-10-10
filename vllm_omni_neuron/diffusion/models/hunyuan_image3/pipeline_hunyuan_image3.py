@@ -55,6 +55,7 @@ from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineL
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
     NeuronHunyuanImage3Transformer,
     default_prefill_len,
+    nki_attention_enabled,
     nki_mlp_enabled,
 )
 from vllm_omni_neuron.lite_compat import is_lite_runtime
@@ -205,6 +206,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         self.prefill_len = int(model_config.get("prefill_len", default_prefill_len()))
         self.vae_dtype = getattr(torch, str(model_config.get("vae_dtype", "float32")))
         use_nki_mlp = nki_mlp_enabled(model_config)
+        use_nki_attention = nki_attention_enabled(model_config)
 
         if config.img_proj_type != "unet":
             raise ValueError(f"Unsupported img_proj_type: {config.img_proj_type}")
@@ -222,7 +224,9 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             )
             config.num_hidden_layers = layers
 
-        self.model = NeuronHunyuanImage3Transformer(config, use_nki_mlp=use_nki_mlp)
+        self.model = NeuronHunyuanImage3Transformer(
+            config, use_nki_mlp=use_nki_mlp, use_nki_attention=use_nki_attention
+        )
 
         hidden_size = int(config.hidden_size)
         latent_channels = int(config.vae["latent_channels"])
