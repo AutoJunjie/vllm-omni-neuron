@@ -82,15 +82,15 @@ is ever dispatched to the device under the Lite runtime.
 | --- | --- | --- |
 | `attention_cte` (causal, d-major output) | prompt prefill attention | torch masked softmax |
 | `output_projection_cte` | every attention output projection | `matmul` + bias |
-| `moe_cte` (blockwise, `shard_on_block`) — **opt-in** | routed experts | every local expert, densely |
+| `moe_cte` (blockwise, `shard_on_block`) | routed experts | every local expert, densely |
 
 Each kernel is gated on `can_run_kernel` and its own tiling limits, so CPU mode and
 fake-tensor tracing take the torch path.
 
-The MoE kernel is opt-in (`model_config.moe_kernel: nki`); the default runs the routed
-experts as dense matmuls because the blockwise path, though correct, is slower (see
-[Measured performance](#measured-performance)). Two kernels were evaluated for the MoE
-and only one can even express this model's step:
+The MoE kernel is on by default (`model_config.moe_kernel: nki`, `moe_block_size: 1024`);
+`torch` switches the routed experts back to dense matmuls, which is the simpler path for
+bisecting. Two kernels were evaluated for the MoE and only one can even express this
+model's step:
 
 - nkilib's dense **`mlp`** (SwiGLU) is numerically correct — it is what confirmed that
   nkilib applies the activation to the *gate* operand — but it validates its own tile
@@ -184,38 +184,33 @@ OpenAI chat endpoint, a cold NEFF build vs a warm cache, and two different physi
 `trn2.48xlarge` instances. So neither the serving path nor the compilation cache nor the
 host introduces numerical divergence.
 
-At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local experts
-densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs. The
-blockwise `moe_cte` kernel removes exactly that arithmetic — and is **still slower**:
+The routed MoE is the dominant term, and the two ways to compute it land in the same
+place once the kernel's block size is tuned:
 
-| Routed MoE | s/step | Warm end to end | Cold generation |
-| --- | --- | --- | --- |
-| dense matmuls (`moe_kernel: torch`, default) | **0.895** | **72.83 s** | 1906 s |
-| blockwise NKI, `moe_block_size: 256` | 1.114 | 81.08 s | **167 s** |
-| blockwise NKI, `moe_block_size: 512` (kernel default) | 0.911 | 74.05 s | 741 s |
-| blockwise NKI, `moe_block_size: 1024` | 0.910 | 74.96 s | 759 s |
+| Routed MoE | s/step (denoise) | Warm end to end (3 runs) |
+| --- | --- | --- |
+| blockwise NKI, `moe_block_size: 1024` (default) | 0.911 | 72.10 s (71.95 / 72.27) |
+| dense matmuls (`moe_kernel: torch`) | **0.895** | 72.83 s (72.53 / 73.24) |
 
-Same prompt, seed and step count; all four produce a coherent image. So the ~8x FLOP
-saving does not pay for the blockwise path's overhead at these shapes: the kernel
-permutes tokens into per-expert blocks and `build_blockwise_mapping` runs its own NKI
-kernels to produce the block metadata, 32 times per step, while the dense path is a
-handful of large regular matmuls that the tensor engine is very good at. Only 12.7% of
-the local (token, expert) pairs are live, so each block is mostly gather/scatter around a
-small amount of arithmetic.
+Block size matters much more than the arithmetic does. Sweeping it at 1024x1024 / 50
+steps, s/step of denoise:
 
-Block size is the one lever that matters: per-block overhead dominates below 512 and the
-curve flattens above it, which is why `moe_block_size` defaults to 512 and lands within
-2% of dense rather than 24% behind it.
+| `moe_block_size` | 256 | 512 | 1024 | 2048 |
+| --- | --- | --- | --- | --- |
+| s/step | 1.115 | 0.911 | 0.911 | 0.949 |
+| warm end to end | 83.00 s | 74.05 s | 72.10 s | 76.17 s |
 
-Where the kernel wins outright is build time. Each layer's MoE collapses to one custom
-call, so the cold NEFF build drops from ~30 minutes to under 3 at block 256 — an 11x
-iteration speedup. That makes `moe_kernel: nki` the better setting while working on the
-model, and dense the better setting for serving latency.
+Only 12.7% of the local (token, expert) pairs are live, so small blocks spend most of
+their time on per-block bookkeeping — the token permutation plus
+`build_blockwise_mapping`'s own NKI kernels, 32 times per step — while large ones pad
+dead rows. At 1024 the blockwise path is at **parity** with dense: its denoise phase is
+still 1.8% slower, and the end-to-end ordering flips only because the host VAE decode
+varies by ~2.7 s run to run (25.1-27.8 s observed). So the honest read is that NKI covers
+the dominant compute at no measured cost, not that sparsity wins here — the ~8x FLOP
+saving is spent entirely on block bookkeeping.
 
-That leaves the host-side VAE decode as the largest remaining term, at 35% of a warm
-request. Exploiting the routing sparsity further is a layout problem rather than a kernel
-one: something that keeps live (token, expert) pairs contiguous would let a plain matmul
-use the same sparsity without per-block bookkeeping.
+That leaves the host-side VAE decode as the largest remaining term, at 36% of a warm
+request.
 
 ## Validation
 
@@ -265,10 +260,12 @@ generates what the prompt asks for" — not quality parity with the reference de
   FP8.
 - The VAE decode runs on the host in float32 on the output rank only, so it is neither
   accelerated nor parallel (28 s at 1024x1024).
-- The routed MoE runs as dense matmuls by default. The blockwise `moe_cte` kernel now
-  works end to end (`moe_kernel: nki` generates a coherent 1024x1024 image over all 32
-  layers) but is 14% slower, so it is not the default — see
-  [Measured performance](#measured-performance).
+- Sparsity buys nothing here. The blockwise MoE kernel is the default and generates a
+  coherent image over all 32 layers, but at best it matches the dense matmuls rather than
+  beating them: block bookkeeping consumes the whole ~8x arithmetic saving (see
+  [Measured performance](#measured-performance)). Making that bookkeeping cheaper — or
+  a kernel that fuses the routing metadata into the expert matmul — is where a real win
+  would come from.
 - An earlier report that the dense MLP kernel "wedged a NeuronCore" was wrong. It raises
   a clean compile-time validation error; the node losses that coincided with it have a
   separate explanation (a standing health-agent flag plus node auto-recovery).

@@ -26,12 +26,14 @@ stage_args:
         # Prompt bucket. The prefill graph is compiled for this length and the prompt is
         # right-padded to it; a different value is a separate (one-off) compile.
         prefill_len: 512
-        # MoE implementation. `torch` (default) evaluates every local expert densely.
-        # `nki` routes the routed experts through the blockwise CTE MoE kernel, which
-        # computes only the (token, expert) pairs the router selected (~8x fewer FLOPs)
-        # — validated standalone on device, but the 32-layer graph currently fails to
-        # schedule, so it stays opt-in. See the model card's known limits.
-        moe_kernel: torch
+        # MoE implementation. `nki` (default) routes the routed experts through the
+        # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
+        # router selected; `torch` evaluates every local expert densely.
+        moe_kernel: nki
+        # Tokens per kernel block. Measured at 1024x1024 / 50 steps, s/step of denoise:
+        # 256 -> 1.115, 512 -> 0.911, 1024 -> 0.911, 2048 -> 0.949. Smaller blocks pay
+        # more per-block bookkeeping; larger ones pad more dead rows.
+        moe_block_size: 1024
         # The VAE decodes on the host; float32 matches the reference decoder.
         vae_dtype: float32
       parallel_config:

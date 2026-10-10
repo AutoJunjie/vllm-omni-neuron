@@ -725,7 +725,7 @@ class NeuronHunyuanMoE(nn.Module):
         tp_group,
         use_kernel: bool,
         moe_group=None,
-        block_size: int = 512,
+        block_size: int = 1024,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -935,7 +935,7 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         use_kernel: bool,
         moe_group=None,
         use_attention_kernel: bool = True,
-        block_size: int = 256,
+        block_size: int = 1024,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -985,7 +985,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         config,
         use_nki_mlp: bool = True,
         use_nki_attention: bool = True,
-        moe_block_size: int = 512,
+        moe_block_size: int = 1024,
     ):
         super().__init__()
         self.config = config
@@ -1252,24 +1252,23 @@ def expected_checkpoint_keys(transformer: NeuronHunyuanImage3Transformer) -> Ite
 def nki_mlp_enabled(model_config: dict | None) -> bool:
     """Resolve the ``moe_kernel`` stage-config knob.
 
-    Defaults to ``torch``: every local expert evaluated densely for every token. That
-    is the path validated end to end on device.
+    Defaults to ``nki``: the routed experts go through the blockwise CTE MoE kernel
+    (``NF.moe_cte``), which computes only the (token, expert) pairs the router selected.
+    At the default ``moe_block_size`` of 1024 that sits at parity with dense matmuls
+    (0.911 vs 0.895 s/step of denoise, within end-to-end run-to-run noise), so NKI covers
+    this model's dominant compute at no measured cost.
 
-    ``nki`` routes the routed experts through the blockwise CTE MoE kernel
-    (``NF.moe_cte``), which computes only the (token, expert) pairs the router selected —
-    NKI on the dominant compute, and roughly 8x fewer FLOPs for this model's
-    top-8-of-64 routing. Standalone on device at the model's shapes it matches the torch
-    MoE math to 7.4e-03 (BF16 level), but the full 32-layer graph compiles and then fails
-    at execution with "Failed to schedule neff execution. status=1", so it stays opt-in
-    until that is resolved. See ``examples/hunyuan_image3/check_moe_cte.py``.
+    ``torch`` evaluates every local expert for every token. It is the simpler path and
+    the one the CPU numerics test exercises, so it is what to switch to when bisecting an
+    accuracy regression.
     """
-    choice = str((model_config or {}).get("moe_kernel", "torch")).lower()
+    choice = str((model_config or {}).get("moe_kernel", "nki")).lower()
     if choice not in ("nki", "torch"):
         raise ValueError(f"model_config.moe_kernel must be 'nki' or 'torch', got {choice!r}")
-    if choice == "nki":
-        logger.warning(
-            "HunyuanImage3 MoE: using the blockwise CTE NKI kernel, which is validated "
-            "standalone but not yet in the full 32-layer graph."
+    if choice == "torch":
+        logger.info(
+            "HunyuanImage3 MoE: blockwise NKI kernel disabled; every local expert will "
+            "be evaluated densely for every token."
         )
     return choice == "nki"
 
