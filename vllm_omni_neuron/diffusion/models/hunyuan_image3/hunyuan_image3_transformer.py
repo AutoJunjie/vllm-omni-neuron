@@ -725,7 +725,7 @@ class NeuronHunyuanMoE(nn.Module):
         tp_group,
         use_kernel: bool,
         moe_group=None,
-        block_size: int = 256,
+        block_size: int = 512,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -778,7 +778,9 @@ class NeuronHunyuanMoE(nn.Module):
         # reads past the last live token for padding slots, so the token buffers are
         # padded up to a multiple of this. The mapping is sized for every
         # (token, local expert) pair, so block_size sets the block count the kernel walks
-        # (T * E_local / block_size) and trades that against per-block padding.
+        # (T * E_local / block_size) and trades that against per-block padding. Measured
+        # at 1024x1024 / 50 steps: 1.114 s/step at 256, 0.911 at 512, 0.910 at 1024 — so
+        # per-block overhead dominates below 512 and flattens above it.
         self.block_size = int(block_size)
 
         num_shared = getattr(config, "num_shared_expert", 0)
@@ -983,7 +985,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         config,
         use_nki_mlp: bool = True,
         use_nki_attention: bool = True,
-        moe_block_size: int = 256,
+        moe_block_size: int = 512,
     ):
         super().__init__()
         self.config = config
