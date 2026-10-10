@@ -301,10 +301,19 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
             last.to("cpu")
             best = (time.perf_counter() - start) / args.runs
 
+            # Compare against this stage's own host activation, not just the final
+            # image: a single wrong stage is otherwise only visible as a wrong result at
+            # the end, with six other suspects.
+            expected = boundaries[index + 1]
+            got = out.to("cpu").float()
+            scale = expected.abs().max().item()
+            stage_error = (got - expected).abs().max().item() / max(scale, 1e-12)
             print(
                 f"  {name:<6} {best:6.2f}s  (host {host_times[index]:.2f}s, "
-                f"{host_times[index] / best:.2f}x, compile {compile_seconds:.0f}s)"
+                f"{host_times[index] / best:.2f}x, compile {compile_seconds:.0f}s) "
+                f"err {stage_error:.2e}"
             )
+            del expected, got
             rows.append((name, best))
             previous, carried = carried, out
             # Drop the finished stage's graph and its input: both hold device buffers,
