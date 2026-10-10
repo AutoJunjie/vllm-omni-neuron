@@ -88,9 +88,9 @@ Each kernel is gated on `can_run_kernel` and its own tiling limits, so CPU mode 
 fake-tensor tracing take the torch path.
 
 The MoE kernel is opt-in (`model_config.moe_kernel: nki`); the default runs the routed
-experts as dense matmuls because the 32-layer graph does not yet execute (see
-[Known limits](#known-limits)). Two kernels were evaluated for the MoE and only one is
-viable:
+experts as dense matmuls because the blockwise path, though correct, is slower (see
+[Measured performance](#measured-performance)). Two kernels were evaluated for the MoE
+and only one can even express this model's step:
 
 - nkilib's dense **`mlp`** (SwiGLU) is numerically correct — it is what confirmed that
   nkilib applies the activation to the *gate* operand — but it validates its own tile
@@ -101,6 +101,17 @@ viable:
 - **`moe_cte`** blocks internally at `block_size`, so one call per layer covers the whole
   step. It consumes the router's dense `[T, E_local]` affinities directly and computes
   only the pairs the router selected.
+
+Getting `moe_cte` to compile inside the model took one non-obvious fix. On its own it was
+clean at every token count the model uses, with up to 32 chained instances and distinct
+weights, with the router in-graph, and with either MoE process group — yet a 1-layer
+model ICEd `neuronx-cc` with
+`[NCC_IMPR902] MaskPropagation error: call to isl_set_union failed: spaces don't match`.
+The difference was how the padding mask reached the kernel: the standalone check passed
+it in as a graph input, while the model built it in-graph with `torch.zeros` plus a slice
+assignment. Replacing that write with an `arange < live` comparison — and omitting the
+mask entirely when the token count already fills whole blocks — compiles. A mask built by
+mutation is what the failing pass could not handle.
 
 The denoise step's attention stays in torch on purpose: `attention_cte` takes no
 per-position mask, and that attention is around 1.5% of a layer's FLOPs next to the
@@ -175,10 +186,23 @@ host introduces numerical divergence.
 
 At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local experts
 densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs. The
-blockwise `moe_cte` kernel removes exactly that overhead and is already wired behind
-`moe_kernel: nki`; getting its 32-layer graph to execute is the single biggest lever
-here (see [Known limits](#known-limits)). The host-side VAE decode is the next largest
-term, at 36% of a warm request.
+blockwise `moe_cte` kernel removes exactly that arithmetic — and is **still slower**:
+
+| Routed MoE | s/step | Warm end to end (3 runs) |
+| --- | --- | --- |
+| dense matmuls (`moe_kernel: torch`, default) | **0.895** | **72.83 s** (72.53 / 73.24) |
+| blockwise NKI (`moe_kernel: nki`) | 1.115 | 83.00 s (81.60 / 85.71) |
+
+Same prompt, seed and step count; both produce a coherent image. So the ~8x FLOP saving
+does not pay for the blockwise path's overhead at these shapes: the kernel permutes
+tokens into per-expert blocks and `build_blockwise_mapping` runs its own NKI kernels to
+produce the block metadata, 32 times per step, while the dense path is a handful of large
+regular matmuls that the tensor engine is very good at. Only 12.7% of the local
+(token, expert) pairs are live, so each block is mostly gather/scatter around a small
+amount of arithmetic.
+
+That makes the host-side VAE decode the largest remaining term, at 35% of a warm
+request, and sparsity a dead end here unless the block bookkeeping gets much cheaper.
 
 ## Validation
 
@@ -228,16 +252,10 @@ generates what the prompt asks for" — not quality parity with the reference de
   FP8.
 - The VAE decode runs on the host in float32 on the output rank only, so it is neither
   accelerated nor parallel (28 s at 1024x1024).
-- The routed MoE runs as dense matmuls. The blockwise `moe_cte` kernel is implemented and
-  wired behind `moe_kernel: nki`, and standalone on device at the model's shapes it
-  matches the torch MoE math to 7.4e-03 with 2087 of 16388 local (token, expert) pairs
-  live — but the full 32-layer graph compiles and then fails at execution with
-  `Failed to schedule neff execution. status=1 message=Unknown Failure`. One kernel
-  instance in a graph is fine; 32 are not, which points at a runtime resource limit (DMA
-  rings or scratchpad) rather than the kernel's math. Next step is a run with
-  `NEURON_RT_LOG_LEVEL=INFO` for the underlying NRT error. Iteration is cheap: each
-  layer's MoE collapses to one custom call, so this graph compiles in ~2 min rather than
-  the dense path's ~30.
+- The routed MoE runs as dense matmuls by default. The blockwise `moe_cte` kernel now
+  works end to end (`moe_kernel: nki` generates a coherent 1024x1024 image over all 32
+  layers) but is 14% slower, so it is not the default — see
+  [Measured performance](#measured-performance).
 - An earlier report that the dense MLP kernel "wedged a NeuronCore" was wrong. It raises
   a clean compile-time validation error; the node losses that coincided with it have a
   separate explanation (a standing health-agent flag plus node auto-recovery).
