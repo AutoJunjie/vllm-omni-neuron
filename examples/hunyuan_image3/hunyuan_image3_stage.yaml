@@ -1,0 +1,43 @@
+# HunyuanImage-3.0-Instruct DiT-only text-to-image on one trn2.48xlarge.
+#
+# TP32 = 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2).
+# Attention is head-parallel (1 of the 32 query heads per rank, with each of the 8 KV
+# heads replicated across its 4 query ranks) and the 64 routed experts are
+# expert-parallel (2 per rank), which puts the 80B BF16 checkpoint at ~5 GB of weights
+# per core and halves per-core MoE work relative to TP16.
+#
+# `devices` is the visible logical-core range. Use hunyuan_image3_stage_tp16.yaml when
+# only 16 cores are free.
+stage_args:
+  - stage_id: 0
+    stage_type: diffusion
+    final_output: true
+    final_output_type: image
+    runtime:
+      process: true
+      devices: "0-31"
+      max_batch_size: 1
+    engine_args:
+      model_class_name: HunyuanImage3ForCausalMM
+      model_stage: diffusion
+      dtype: bfloat16
+      trust_remote_code: true
+      model_config:
+        # Prompt bucket. The prefill graph is compiled for this length and the prompt is
+        # right-padded to it; a different value is a separate (one-off) compile.
+        prefill_len: 512
+        # MoE implementation. `nki` (default) routes the routed experts through the
+        # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
+        # router selected; `torch` evaluates every local expert densely.
+        moe_kernel: nki
+        # Tokens per kernel block. Measured at 1024x1024 / 50 steps, s/step of denoise:
+        # 256 -> 1.115, 512 -> 0.911, 1024 -> 0.911, 2048 -> 0.949. Smaller blocks pay
+        # more per-block bookkeeping; larger ones pad more dead rows.
+        moe_block_size: 1024
+        # The VAE decodes on the host; float32 matches the reference decoder.
+        vae_dtype: float32
+      parallel_config:
+        tensor_parallel_size: 32
+        cfg_parallel_size: 1
+        ring_degree: 1
+        vae_patch_parallel_size: 1
