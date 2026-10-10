@@ -136,6 +136,15 @@ parser.add_argument(
     "reproduces it in _group_norm_f32, and the VAE decode did not. torch.autocast on "
     "the neuron device cannot do it: that hook is a numeric no-op shim.",
 )
+parser.add_argument(
+    "--keep-original-weights",
+    action="store_true",
+    help="Keep each routed convolution's original weight alongside its packed NKI copy. "
+    "They hold the same values, and the decoder's float32 weights are 3.25 GiB of which "
+    "the routed convolutions are 3.23 GiB, so keeping both costs 3.23 GiB of a core's "
+    "24 GiB -- which is why this is off by default. Only needed if a site has to fall "
+    "back to torch, which cannot happen at 1024x1024 with --nki-min-d-out 1.",
+)
 parser.add_argument("--skip-device", action="store_true", help="Host reference only")
 args = parser.parse_args()
 
@@ -465,9 +474,17 @@ def main() -> None:
         # Install after the move to device: the packed filters have to land on the same
         # device as the weights they came from.
         summary = install_nki_conv_dispatch(
-            device_vae, min_d_out=args.nki_min_d_out, verbose=True
+            device_vae,
+            min_d_out=args.nki_min_d_out,
+            verbose=True,
+            free_original=not args.keep_original_weights,
         )
-        print(f"NKI conv dispatch: {summary['routed']} routed, {summary['skipped']} on compiler")
+        freed = summary["freed_bytes"] / 2**30
+        print(
+            f"NKI conv dispatch: {summary['routed']} routed, {summary['skipped']} on "
+            f"compiler, {freed:.2f} GiB of duplicate weights released"
+        )
+        gc.collect()
         for site in summary["sites"]:
             print(f"  {site}")
 

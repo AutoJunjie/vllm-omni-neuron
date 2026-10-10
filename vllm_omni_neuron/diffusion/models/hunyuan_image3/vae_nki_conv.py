@@ -119,6 +119,11 @@ def _pack_filters(weight: torch.Tensor, bias: torch.Tensor):
     )
 
 
+def packed_itemsize(conv) -> int:
+    """Bytes per element of this site's packed filters."""
+    return conv._nki_packed_filters[0].element_size()
+
+
 def _is_eligible(conv: nn.Conv3d) -> bool:
     """Static, weight-only dispatch test, evaluated once at install time.
 
@@ -144,13 +149,21 @@ def _nki_forward(self, input):
 
     Falls back to the original forward whenever the kernel's documented range does not
     cover the call -- spatial dims over 1024, or a depth below the measured floor --
-    rather than guessing outside it.
+    rather than guessing outside it. If the original weight was released, that fallback
+    is gone, so it raises instead of silently computing something else.
     """
     filters = getattr(self, "_nki_packed_filters", None)
     if filters is None:
         return self._original_forward(input)
     _, _, depth, height, width = input.shape
     if depth < self._nki_min_d_out or height > _MAX_SPATIAL or width > _MAX_SPATIAL:
+        if self.weight is None:
+            raise RuntimeError(
+                f"NKI conv site needs its torch fallback for input {tuple(input.shape)} "
+                f"(min D_out {self._nki_min_d_out}, max spatial {_MAX_SPATIAL}), but the "
+                "original weight was released by install_nki_conv_dispatch("
+                "free_original=True). Re-install with free_original=False."
+            )
         return self._original_forward(input)
     x = input.to(filters[0].dtype)
     if len(filters) == 1:
@@ -161,17 +174,27 @@ def _nki_forward(self, input):
     )
 
 
-def install_nki_conv_dispatch(vae, min_d_out: int = 1, verbose: bool = False) -> dict:
+def install_nki_conv_dispatch(
+    vae, min_d_out: int = 1, verbose: bool = False, free_original: bool = False
+) -> dict:
     """Install NKI dispatch on every eligible ``Conv3d`` in ``vae.decoder``.
 
     Returns a summary of what was routed, so a caller can report coverage instead of
     assuming it. Idempotent: a second call leaves already-installed sites alone.
+
+    ``free_original`` releases each routed site's ``weight`` once it has been packed.
+    The packed copy carries the same values in the kernel's layout, so keeping both
+    doubles the decoder's residency: its float32 weights are 3.25 GiB and the routed
+    3x3x3 convolutions are 3.23 GiB of that, which is half of the 13.1 GiB this decode
+    was measured holding on a core that has 24 GiB. Freeing them is what buys the
+    headroom for the 1024x1024 stages, whose activations are ~2.1 GiB per tensor. It
+    costs the torch fallback at those sites, which then raises rather than mis-computes.
     """
     from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
         can_run_kernel,
     )
 
-    summary = {"routed": 0, "skipped": 0, "sites": []}
+    summary = {"routed": 0, "skipped": 0, "freed_bytes": 0, "sites": []}
     for name, module in vae.decoder.named_modules():
         if not isinstance(module, nn.Conv3d):
             continue
@@ -191,6 +214,14 @@ def install_nki_conv_dispatch(vae, min_d_out: int = 1, verbose: bool = False) ->
         # Bind per instance: the class is shared with the encoder and with sites that
         # stay on the compiler, so patching the class would route them too.
         module.forward = _nki_forward.__get__(module, type(module))
+        if free_original:
+            # Drop the Parameter itself, not just its data: the packed copy is the only
+            # form the kernel reads, and ``weight is None`` is what the forward checks.
+            module._parameters.pop("weight", None)
+            module.weight = None
+            summary["freed_bytes"] += int(
+                module.in_channels * module.out_channels * 27 * packed_itemsize(module)
+            )
         summary["routed"] += 1
         if verbose:
             groups = len(module._nki_packed_filters)
