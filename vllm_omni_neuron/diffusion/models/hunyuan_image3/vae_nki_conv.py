@@ -1,0 +1,159 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Route the HunyuanImage-3.0 VAE decoder's 3x3x3 convolutions through NKI.
+
+The decoder will not compile as a whole: 10,746,838 instructions at 1024x1024 against
+``NeuronHloVerifier``'s 10,000,000 ceiling (``NCC_EVRF007``), and shrinking the image
+makes it worse, not better -- 11,852,476 at 512x512, 17,488,800 for a single 384x384
+spatial tile. The count tracks the decoder's op count and the compiler's per-op expansion
+at small spatial dims, not the data volume, which is why tiling cannot fix it and why
+``--internal-max-instruction-limit`` cannot either (it reaches ``walrus_driver``, but the
+rejection happens earlier, in the HLO verifier).
+
+What *can* fix it is not generating those instructions in the first place. The decoder's
+cost is 44 ``Conv3d`` calls over activations up to 1 GB, and a NKI kernel is one opaque op
+to the compiler instead of a convolution it expands itself. This is the same move the
+Wan2.2 VAE in this repo makes (``diffusion/distributed/autoencoders/autoencoder_kl_wan.py``),
+reusing the same ``nkilib`` kernel.
+
+The dispatch differs from Wan's in two ways that follow from this VAE rather than from
+preference:
+
+* Wan's convolutions are **causal** -- ``WanCausalConv3d`` prepends cached frames and
+  zeroes ``pad_d_left`` -- so its single kernel instantiation carries padding
+  ``(0, 0, 1, 1, 1, 1)``. HunyuanImage-3.0's ``Conv3d`` pads symmetrically, so the
+  temporal pad is 1 on both sides. Padding is a trace-time constant, so this is a
+  separate ``@nki.jit`` wrapper, not a parameter.
+* Wan excludes ``D_out < 2`` on measured grounds. Here the decoder runs at D=1 before the
+  first temporal upsample and D=2 or 4 after it, so that exclusion would drop
+  ``conv_in`` and the ``mid`` blocks; whether it should is a measurement, so it is a
+  parameter of :func:`install_nki_conv_dispatch` rather than a constant.
+"""
+
+import nki
+import torch
+import torch.nn as nn
+from nkilib.experimental.conv.conv3d import conv3d
+
+from vllm_omni_neuron.lite_compat import nki_op
+
+# (pad_d_left, pad_d_right, pad_h_top, pad_h_bottom, pad_w_left, pad_w_right). This VAE's
+# 3x3x3 convolutions are symmetric pad-1 on every axis, including the temporal one -- the
+# one static config that covers every routed site, which is what makes a single traced
+# kernel enough.
+_PADDING = (1, 1, 1, 1, 1, 1)
+
+# C_out sits on the PSUM partition dim and C_in on the contraction dim, so a convolution
+# that is thin in either starves the PE array. This VAE's channel counts are 32 (latent),
+# 128, 256, 512, 1024 and 3 (``conv_out``), so these two floors route everything except
+# ``conv_out`` and leave no site near a boundary.
+_MIN_IN_CHANNELS = 96
+_MIN_OUT_CHANNELS = 32
+
+# nkilib's documented range for this kernel. The decoder's last two levels run at
+# H=W=1024, the top of it; C_in peaks at 1024 against a 1280 limit.
+_MAX_SPATIAL = 1024
+_MAX_IN_CHANNELS = 1280
+_MAX_OUT_CHANNELS = 2048
+
+
+@nki.jit
+def _vae_conv3d_kernel(x, filters, bias):
+    return conv3d(
+        x,
+        filters,
+        bias,
+        stride=(1, 1, 1),
+        padding=_PADDING,
+        dilation=(1, 1, 1),
+        lnc_shard=True,
+    )
+
+
+@nki_op("hunyuan_image3_vae::conv3d_3x3x3")
+def _nki_conv3d(x: torch.Tensor, filters: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+    from libtorch_neuronx_lite.nki.nki_hop import wrap_nki
+
+    return wrap_nki(_vae_conv3d_kernel)[2](x, filters, bias)
+
+
+def _pack_filters(weight: torch.Tensor) -> torch.Tensor:
+    """Permute ``[C_out, C_in, K_d, K_h, K_w]`` into the kernel's ``[K_d, K_h, K_w, C_in, C_out]``.
+
+    ``.contiguous()`` on a permuted *device* tensor raises ``Expected self.is_contiguous()
+    to be true`` -- the Lite device kernels cannot restride in place -- so stage the
+    permute and copy on the host and move the packed result back.
+    """
+    source = weight.detach()
+    device = source.device
+    if device.type != "cpu":
+        return source.cpu().permute(2, 3, 4, 1, 0).contiguous().to(source.dtype).to(device)
+    return source.permute(2, 3, 4, 1, 0).contiguous().to(source.dtype)
+
+
+def _is_eligible(conv: nn.Conv3d) -> bool:
+    """Static, weight-only dispatch test, evaluated once at install time.
+
+    Depth is deliberately not checked here: with symmetric pad-1 on a K_d=3 kernel
+    ``D_out == D``, so the input decides it and only the forward can.
+    """
+    if conv.bias is None or conv.groups != 1:
+        return False
+    if tuple(conv.kernel_size) != (3, 3, 3):
+        return False
+    if tuple(conv.stride) != (1, 1, 1) or tuple(conv.dilation) != (1, 1, 1):
+        return False
+    if tuple(conv.padding) != (1, 1, 1):
+        return False
+    if conv.in_channels < _MIN_IN_CHANNELS or conv.out_channels <= _MIN_OUT_CHANNELS:
+        return False
+    return conv.in_channels <= _MAX_IN_CHANNELS and conv.out_channels <= _MAX_OUT_CHANNELS
+
+
+def _nki_forward(self, input):
+    """``Conv3d.forward`` that routes through NKI when this site was installed.
+
+    Falls back to the original forward whenever the kernel's documented range does not
+    cover the call -- spatial dims over 1024, or a depth below the measured floor --
+    rather than guessing outside it.
+    """
+    packed = getattr(self, "_nki_packed_filters", None)
+    if packed is None:
+        return self._original_forward(input)
+    _, _, depth, height, width = input.shape
+    if depth < self._nki_min_d_out or height > _MAX_SPATIAL or width > _MAX_SPATIAL:
+        return self._original_forward(input)
+    return _nki_conv3d(input.to(packed.dtype), packed, self.bias.to(packed.dtype))
+
+
+def install_nki_conv_dispatch(vae, min_d_out: int = 1, verbose: bool = False) -> dict:
+    """Install NKI dispatch on every eligible ``Conv3d`` in ``vae.decoder``.
+
+    Returns a summary of what was routed, so a caller can report coverage instead of
+    assuming it. Idempotent: a second call leaves already-installed sites alone.
+    """
+    from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
+        can_run_kernel,
+    )
+
+    summary = {"routed": 0, "skipped": 0, "sites": []}
+    for name, module in vae.decoder.named_modules():
+        if not isinstance(module, nn.Conv3d):
+            continue
+        if getattr(module, "_nki_packed_filters", None) is not None:
+            continue
+        shape = f"{module.in_channels}->{module.out_channels}"
+        if not can_run_kernel(module.weight) or not _is_eligible(module):
+            summary["skipped"] += 1
+            if verbose:
+                summary["sites"].append(f"skip {name} ({shape}, k{tuple(module.kernel_size)})")
+            continue
+        module._original_forward = module.forward
+        module._nki_min_d_out = min_d_out
+        module._nki_packed_filters = _pack_filters(module.weight)
+        # Bind per instance: the class is shared with the encoder and with sites that
+        # stay on the compiler, so patching the class would route them too.
+        module.forward = _nki_forward.__get__(module, type(module))
+        summary["routed"] += 1
+        if verbose:
+            summary["sites"].append(f"nki  {name} ({shape})")
+    return summary

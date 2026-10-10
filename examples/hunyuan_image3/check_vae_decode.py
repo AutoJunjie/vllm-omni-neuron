@@ -106,6 +106,21 @@ parser.add_argument(
     "norm_out+conv_out) instead of one graph for the whole decode. Intermediates stay on "
     "device between stages. Reports per-stage host time and compiled instruction count.",
 )
+parser.add_argument(
+    "--nki-conv",
+    action="store_true",
+    help="Route the decoder's 3x3x3 convolutions through the nkilib conv3d kernel, so the "
+    "compiler sees one opaque op per convolution instead of expanding 44 of them itself. "
+    "This is what the Wan2.2 VAE in this repo does.",
+)
+parser.add_argument(
+    "--nki-min-d-out",
+    type=int,
+    default=1,
+    help="Skip NKI dispatch for convolutions whose input depth is below this. Wan's VAE "
+    "uses 2 on measured grounds; this decoder runs at D=1 until the first temporal "
+    "upsample, so 1 routes conv_in and the mid blocks too.",
+)
 parser.add_argument("--skip-device", action="store_true", help="Host reference only")
 args = parser.parse_args()
 
@@ -367,6 +382,20 @@ def main() -> None:
 
     device_vae = _load_vae_weights(_build_vae(config, dtype), args.model_path, dtype)
     device_vae = device_vae.to(device)
+
+    if args.nki_conv:
+        from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import (
+            install_nki_conv_dispatch,
+        )
+
+        # Install after the move to device: the packed filters have to land on the same
+        # device as the weights they came from.
+        summary = install_nki_conv_dispatch(
+            device_vae, min_d_out=args.nki_min_d_out, verbose=True
+        )
+        print(f"NKI conv dispatch: {summary['routed']} routed, {summary['skipped']} on compiler")
+        for site in summary["sites"]:
+            print(f"  {site}")
 
     if args.stages:
         device_vae.requires_grad_(False)
