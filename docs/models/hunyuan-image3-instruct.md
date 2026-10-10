@@ -188,21 +188,34 @@ At 0.90 s/step the routed MoE dominates: every rank evaluates both of its local 
 densely for all 8194 tokens, which is about 8x the FLOPs that top-8-of-64 needs. The
 blockwise `moe_cte` kernel removes exactly that arithmetic — and is **still slower**:
 
-| Routed MoE | s/step | Warm end to end (3 runs) |
-| --- | --- | --- |
-| dense matmuls (`moe_kernel: torch`, default) | **0.895** | **72.83 s** (72.53 / 73.24) |
-| blockwise NKI (`moe_kernel: nki`) | 1.115 | 83.00 s (81.60 / 85.71) |
+| Routed MoE | s/step | Warm end to end | Cold generation |
+| --- | --- | --- | --- |
+| dense matmuls (`moe_kernel: torch`, default) | **0.895** | **72.83 s** | 1906 s |
+| blockwise NKI, `moe_block_size: 256` | 1.114 | 81.08 s | **167 s** |
+| blockwise NKI, `moe_block_size: 512` (kernel default) | 0.911 | 74.05 s | 741 s |
+| blockwise NKI, `moe_block_size: 1024` | 0.910 | 74.96 s | 759 s |
 
-Same prompt, seed and step count; both produce a coherent image. So the ~8x FLOP saving
-does not pay for the blockwise path's overhead at these shapes: the kernel permutes
-tokens into per-expert blocks and `build_blockwise_mapping` runs its own NKI kernels to
-produce the block metadata, 32 times per step, while the dense path is a handful of large
-regular matmuls that the tensor engine is very good at. Only 12.7% of the local
-(token, expert) pairs are live, so each block is mostly gather/scatter around a small
-amount of arithmetic.
+Same prompt, seed and step count; all four produce a coherent image. So the ~8x FLOP
+saving does not pay for the blockwise path's overhead at these shapes: the kernel
+permutes tokens into per-expert blocks and `build_blockwise_mapping` runs its own NKI
+kernels to produce the block metadata, 32 times per step, while the dense path is a
+handful of large regular matmuls that the tensor engine is very good at. Only 12.7% of
+the local (token, expert) pairs are live, so each block is mostly gather/scatter around a
+small amount of arithmetic.
 
-That makes the host-side VAE decode the largest remaining term, at 35% of a warm
-request, and sparsity a dead end here unless the block bookkeeping gets much cheaper.
+Block size is the one lever that matters: per-block overhead dominates below 512 and the
+curve flattens above it, which is why `moe_block_size` defaults to 512 and lands within
+2% of dense rather than 24% behind it.
+
+Where the kernel wins outright is build time. Each layer's MoE collapses to one custom
+call, so the cold NEFF build drops from ~30 minutes to under 3 at block 256 — an 11x
+iteration speedup. That makes `moe_kernel: nki` the better setting while working on the
+model, and dense the better setting for serving latency.
+
+That leaves the host-side VAE decode as the largest remaining term, at 35% of a warm
+request. Exploiting the routing sparsity further is a layout problem rather than a kernel
+one: something that keeps live (token, expert) pairs contiguous would let a plain matmul
+use the same sparsity without per-block bookkeeping.
 
 ## Validation
 
