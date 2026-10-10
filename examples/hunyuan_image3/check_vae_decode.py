@@ -270,25 +270,42 @@ def _install_fp32_norms(vae) -> int:
 
 
 def _install_fp32_attention(vae) -> int:
-    """Run the mid block's attention wholly in float32.
+    """Run the mid block's attention softmax in float32, leaving its 1x1 convs alone.
 
-    Its softmax is another low-precision reduction, and whether the compiler accumulates
-    it in float32 is not something this side can confirm. The block runs at 64x64 on
-    1024 channels and the whole in+mid stage is 0.24 s of a 29 s decode, so buying
-    certainty here costs nothing worth measuring.
+    The softmax is another low-precision reduction whose accumulation dtype this side
+    cannot confirm, so it gets the same treatment as the GroupNorm statistics. Only the
+    reduction is upcast: casting the module's parameters instead fails outright, because
+    Lite device tensors cannot be restrided or retyped in place (``Expected self.dtype()
+    == dst.dtype()``), and it would not be the part that matters anyway. The block runs
+    at 64x64, inside a stage that is 0.24 s of a 29 s decode.
     """
+    from einops import rearrange
+
+    def attention(self, hidden):
+        hidden = self.norm(hidden)
+        query, key, value = self.q(hidden), self.k(hidden), self.v(hidden)
+        batch, channels, frames, height, width = query.shape
+        pattern = "b c f h w -> b 1 (f h w) c"
+        query = rearrange(query, pattern).contiguous().float()
+        key = rearrange(key, pattern).contiguous().float()
+        value = rearrange(value, pattern).contiguous().float()
+        attended = nn.functional.scaled_dot_product_attention(query, key, value)
+        attended = attended.to(hidden.dtype)
+        return rearrange(
+            attended,
+            "b 1 (f h w) c -> b c f h w",
+            f=frames,
+            h=height,
+            w=width,
+            c=channels,
+            b=batch,
+        )
+
     installed = 0
     for module in vae.decoder.modules():
-        if type(module).__name__ != "AttnBlock":
-            continue
-        inner = module.forward
-
-        def forward(x, inner=inner, module=module):
-            return inner(x.float()).to(x.dtype)
-
-        module.float()
-        module.forward = forward
-        installed += 1
+        if type(module).__name__ == "AttnBlock":
+            module.attention = attention.__get__(module, type(module))
+            installed += 1
     return installed
 
 
