@@ -28,6 +28,12 @@ parser = argparse.ArgumentParser(description="Precompile the staged device VAE d
 parser.add_argument("--model-path", default="/workspace/models/HunyuanImage-3.0-Instruct")
 parser.add_argument("--height", type=int, default=1024)
 parser.add_argument("--width", type=int, default=1024)
+parser.add_argument(
+    "--dtype",
+    default="float16",
+    choices=["float16", "bfloat16"],
+    help="Device dtype of the decoder; match the stage config's vae_device_dtype.",
+)
 parser.add_argument("--stage", default=None, help="Compile only this stage, on this process")
 parser.add_argument(
     "--first-core",
@@ -49,6 +55,7 @@ def _launch_all() -> int:
         cmd = [sys.executable, os.path.abspath(__file__), "--stage", name]
         cmd += ["--model-path", args.model_path]
         cmd += ["--height", str(args.height), "--width", str(args.width)]
+        cmd += ["--dtype", args.dtype]
         children.append((name, subprocess.Popen(cmd, env=env)))
         print(f"[launch] {name} on core {args.first_core + offset}", flush=True)
     failed = [name for name, child in children if child.wait() != 0]
@@ -119,7 +126,7 @@ def main() -> None:
 
     device = current_omni_platform.get_torch_device(0)
     host_vae = AutoencoderKLConv3D.from_config({**vae_config, "only_decoder": True}).eval()
-    decoder = StagedDeviceDecoder(host_vae, vae_config, device)
+    decoder = StagedDeviceDecoder(host_vae, vae_config, device, dtype=getattr(torch, args.dtype))
     stage = dict(decoder.stages)[args.stage]
 
     hidden = torch.zeros(shape, dtype=decoder.dtype).to(device)

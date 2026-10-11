@@ -14,8 +14,13 @@ only under four conditions, each found by the previous answer failing
 * **GroupNorm statistics and the attention softmax in float32.** Plain bfloat16 decodes a
   garbage image (1.0265 relative error); the cause is the 16.8M-element reductions, not
   the mantissa. With float32 reductions the image frame is 1.64e-02 off host float32.
-* **bfloat16 residency.** float32 holds 13.1 GiB of a core's 24 GiB and runs out at
+* **16-bit residency.** float32 holds 13.1 GiB of a core's 24 GiB and runs out at
   ``up3``; bfloat16 with the duplicate conv weights released is 5.0 GiB.
+
+The default dtype is float16: same speed and residency as bfloat16, with 3 more mantissa
+bits -- 66.15 dB PSNR to the host float32 decode against bfloat16's 58.71 dB. Its range
+is the price. Activations peak at ~9.7e3 here, inside float16's 65504, but a GroupNorm
+squares them; see :func:`install_fp32_norms`.
 
 The NEFF cache key is the lowered MLIR plus :data:`COMPILER_ARGS`, and the MLIR carries
 each op's source location -- the absolute path and line of every traced frame. So the
@@ -62,6 +67,20 @@ def install_fp32_norms(vae) -> int:
     residual bias on the variance is ~(7.8e-03)^2/3, negligible, where cancellation is
     not. ``eps`` is added in float32, which also keeps it off float16's subnormal range
     (1e-6 is below float16's smallest normal, 6.1e-5).
+
+    In float16 the square itself is the hazard: anything past 256 squares past 65504, and
+    the last two levels carry activations near 9.7e3. Accumulating in float32 does not
+    help when the square is formed first, in the input dtype. So float16 scales each
+    group by a power of two ``s`` that brings ``|x - mean|`` to at most 1 *before*
+    centring, and normalises the scaled values directly -- the result is scale-invariant
+    once ``eps`` is scaled by ``s**2`` too. A power of two is exact in every binary format,
+    so this adds no rounding, nothing larger than 1 is ever squared, and there is still
+    exactly one full-size temporary. That last part is a measured constraint: scaling the
+    centred values instead kept a second one alive, which grew the largest stage's
+    scratchpad by 0.75 GiB and ran the output rank's core out of memory once all seven
+    stage NEFFs were resident (the second request). The peak comes from ``amax``/``amin``
+    rather than ``abs().amax()`` for the same reason. The rsqrt is clamped to float16's
+    range only for a constant group, where every centred value is 0 anyway.
     """
 
     def forward(self, x):
@@ -71,9 +90,19 @@ def install_fp32_norms(vae) -> int:
         dims = tuple(range(2, grouped.dim()))
 
         mean = grouped.mean(dim=dims, keepdim=True, dtype=torch.float32)
-        centred = grouped - mean.to(x.dtype)
-        variance = centred.pow(2).mean(dim=dims, keepdim=True, dtype=torch.float32)
-        scale = torch.rsqrt(variance + self.eps).to(x.dtype)
+        if x.dtype == torch.float16:
+            peak = torch.maximum(
+                grouped.amax(dim=dims, keepdim=True), -grouped.amin(dim=dims, keepdim=True)
+            ).float()
+            unit = torch.exp2(-torch.ceil(torch.log2(2.0 * peak.clamp_min(2.0**-14))))
+            centred = grouped * unit.to(x.dtype) - (mean * unit).to(x.dtype)
+            variance = centred.pow(2).mean(dim=dims, keepdim=True, dtype=torch.float32)
+            scale = torch.rsqrt(variance + self.eps * unit * unit).clamp(max=65504.0)
+            scale = scale.to(x.dtype)
+        else:
+            centred = grouped - mean.to(x.dtype)
+            variance = centred.pow(2).mean(dim=dims, keepdim=True, dtype=torch.float32)
+            scale = torch.rsqrt(variance + self.eps).to(x.dtype)
 
         normalised = (centred * scale).reshape(shape)
         affine_shape = (1, channels) + (1,) * (len(shape) - 2)
@@ -203,7 +232,7 @@ def prepare_device_decoder(vae, *, min_d_out: int = 1, free_original: bool = Tru
 
 
 class StagedDeviceDecoder:
-    """The VAE decoder on one NeuronCore: bfloat16, float32 reductions, staged graphs.
+    """The VAE decoder on one NeuronCore: 16-bit, float32 reductions, staged graphs.
 
     Built from the pipeline's host VAE, so the checkpoint is read once. Decoder only: the
     encoder is 1.45 GiB that a decode never touches. Each stage compiles on its first call
@@ -211,7 +240,7 @@ class StagedDeviceDecoder:
     (~95 s with a warm NEFF cache at 1024x1024, ~2 hours cold).
     """
 
-    def __init__(self, host_vae, vae_config, device, dtype=torch.bfloat16):
+    def __init__(self, host_vae, vae_config, device, dtype=torch.float16):
         from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
 
         from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import _MAX_SPATIAL

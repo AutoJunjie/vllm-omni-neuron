@@ -89,6 +89,37 @@ def test_fp32_reductions_match_the_reference_in_float32():
     print(f"{norms} GroupNorms + {attention} attention, float32 relative error {error:.3e}")
 
 
+def test_float16_norm_survives_activations_past_256():
+    """float16 GroupNorm stays finite and accurate where squaring in float16 would not.
+
+    The decoder's last levels carry activations near 9.7e3; anything past 256 squares past
+    float16's 65504. Eager CPU float16 forms the square in float16, so it shows the
+    overflow a compiler is free to produce: the naive variance goes to inf here.
+    """
+    torch.manual_seed(0)
+    x = torch.randn(1, 64, 2, 16, 16)
+    x = (x / x.abs().max() * 9700.0).half()
+
+    naive = x.reshape(1, 32, -1)
+    naive = (naive - naive.float().mean(-1, keepdim=True).half()).pow(2)
+    assert not bool(torch.isfinite(naive).all()), "expected the naive square to overflow"
+
+    norm = nn.GroupNorm(32, 64, eps=1e-6).half()
+    install_fp32_norms(type("Holder", (), {"decoder": norm})())
+    with torch.no_grad():
+        actual = norm(x).float()
+    expected = nn.functional.group_norm(x.float(), 32, eps=1e-6)
+    assert bool(torch.isfinite(actual).all()), "float16 GroupNorm overflowed"
+    error = (actual - expected).abs().max().item() / expected.abs().max().item()
+    assert error < 2e-3, f"float16 GroupNorm differs by {error:.3e}"
+    print(f"float16 GroupNorm at peak 9700: finite, relative error {error:.3e}")
+
+    # A constant group has zero variance; its output must be the bias, not inf * 0.
+    with torch.no_grad():
+        flat = norm(torch.full((1, 64, 2, 4, 4), 3000.0, dtype=torch.float16)).float()
+    assert bool(torch.isfinite(flat).all()), "constant group produced inf/nan"
+
+
 def test_supports_follows_the_kernel_spatial_range():
     """1024x1024 decodes on device; anything past 1024 a side goes back to the host."""
     from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import StagedDeviceDecoder
@@ -104,5 +135,6 @@ def test_supports_follows_the_kernel_spatial_range():
 if __name__ == "__main__":
     test_stages_compose_to_the_decoder()
     test_fp32_reductions_match_the_reference_in_float32()
+    test_float16_norm_survives_activations_past_256()
     test_supports_follows_the_kernel_spatial_range()
     print("OK")

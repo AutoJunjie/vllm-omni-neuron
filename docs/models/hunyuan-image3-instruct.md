@@ -76,12 +76,14 @@ The scheduler, the CFG combine and the 133k x 4096 token embedding stay on the h
 That keeps a 1.1 GB table off every core, and means no uncompiled operation is ever
 dispatched to the device under the Lite runtime.
 
-The VAE decode runs on the output rank's core by default (`model_config.vae_device:
-neuron`), as seven staged bfloat16 graphs with float32 reductions -- see
-[Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device).
-`vae_device: cpu` decodes on the host in float32 (`vae_dtype`), which is the reference;
-the device path also falls back to it for any image wider or taller than 1024, past the
-NKI convolution's spatial range.
+The VAE decode runs on device by default (`model_config.vae_device: neuron`), as seven
+staged float16 graphs with float32 reductions (`vae_device_dtype`), in a worker process on
+a NeuronCore of its own (`vae_device_core`: 32 in the TP32 stage config, 16 in TP16) -- see
+[Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device). That core
+must be outside the stage's `devices` range and otherwise unused. `vae_device: cpu`
+decodes on the host in float32 (`vae_dtype`), which is the reference; the device path
+falls back to it for any image wider or taller than 1024, past the NKI convolution's
+spatial range, and for a request whose device decode fails.
 
 ### NKI kernels
 
@@ -154,11 +156,22 @@ curl -s http://localhost:8091/v1/chat/completions \
 
 A cold NEFF cache means the first request at a resolution compiles the VAE's seven stage
 graphs in series inside that request, ~2 hours at 1024x1024. Compile them in parallel
-beforehand instead -- one process per stage on cores 0-6, so stop the server first:
+beforehand instead -- one process per stage on cores 0-6, so stop the server first.
+`--dtype` must match the stage config's `vae_device_dtype` (float16 by default):
 
 ```bash
 python examples/hunyuan_image3/compile_vae_stages.py --height 1024 --width 1024
 ```
+
+On the Lite runtime the worker pins the CCOM root (`NEURON_RT_ROOT_COMM_ID`) to
+`localhost:61234 + <first core of the stage>`, the range vllm-neuron reserves for it, which
+lies outside the kernel's ephemeral ports (32768-60999). Left to the backend, rank 0 picks
+a free ephemeral port, releases it, and binds it only at the first collective; meanwhile
+the same process opens ~20 listening sockets of its own from that range, and when one
+lands on it the bind fails with `EADDRINUSE` (`Failed to schedule neff execution`, or
+every other rank waiting on the root). That happened on 3 of 9 starts on one node before
+the pin. Two servers on one node therefore need disjoint `devices`, which they need
+anyway.
 
 Per-request stage timings are written to
 `$WORKLOAD_OUTPUT_RW/metrics/pipeline_perf_metrics.json` (`/tmp/metrics/...` by default):
@@ -167,25 +180,26 @@ Per-request stage timings are written to
 
 ## Measured performance
 
-One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, CFG batch of 2
-(`guidance_scale` 2.5), default stage config (`moe_kernel: nki`, `vae_device: neuron`).
-Measured 2026-10-11, from `pipeline_perf_metrics.json` on warm generations, against the
-same build with `--vae-device cpu`:
+One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG batch of 2
+(`guidance_scale` 2.5), `moe_kernel: nki`. Measured 2026-10-11, from
+`pipeline_perf_metrics.json` on warm generations. The default is the first column; the
+other two are the same build with the VAE elsewhere:
 
-| Stage | `vae_device: neuron` | `vae_device: cpu` |
-| --- | ---: | ---: |
-| Prompt prefill | 0.04 s | 0.03 s |
-| Denoise (50 steps) | 45.01 s (0.900 / step) | 45.08 s (0.902 / step) |
-| VAE decode | **2.49 s** (device, bfloat16) | 29.17 s (host, float32) |
-| End to end (`e2e_forward_seconds`) | **47.59 s** | 74.34 s |
-| `run.py --profile --runs 2`, average | **47.62 s** (47.60 / 47.64) | 74.19 s (74.03 / 74.35) |
-| `diffusion_benchmark_serving.py`, 4 requests | **48.22 s** mean, P95 48.37 s | -- |
+| Stage | float16 VAE, own core (default) | bfloat16 VAE, output rank's core | host VAE (`cpu`) |
+| --- | ---: | ---: | ---: |
+| Prompt prefill | 0.04 s | 0.04 s | 0.03 s |
+| Denoise (50 steps) | 45.08 s (0.902 / step) | 45.01 s (0.900 / step) | 45.08 s (0.902 / step) |
+| VAE decode | **1.84 s** | 2.49 s | 29.17 s (float32) |
+| End to end (`e2e_forward_seconds`) | **47.03 s** | 47.59 s | 74.34 s |
+| `run.py --profile`, average | **47.04 s** (3 runs, 46.98-47.09) | 47.62 s (2 runs) | 74.19 s (2 runs) |
+| `diffusion_benchmark_serving.py`, 4 requests | **47.55 s** mean, P95 47.75 s | 48.22 s mean, P95 48.37 s | -- |
+| PSNR to the host decode, same prompt and seed | **66.41 dB** | 58.92 dB | reference |
 
-The serving benchmark ran against `serve.sh`: 4/4 successful, 192.88 s wall, latency
-median 48.28 s, P99 48.37 s, `stage_0_gen_ms` mean 47670. The offline image and the one
-returned by `/v1/chat/completions` for the same prompt and seed are byte-identical
-(`sha256 73c6c5aa...`). Moving the decode saves 26.7 s, 36% of the request; denoise is now
-95% of it.
+The float16 serving run: 4/4 successful, 190.20 s wall, median 47.54 s, P99 47.76 s,
+`stage_0_gen_ms` mean 47020. The offline image and the one returned by
+`/v1/chat/completions` for the same prompt and seed are byte-identical (float16
+`sha256 a540ebeb...`, bfloat16 `73c6c5aa...`). Moving the decode saves 27.3 s, 37% of the
+request; denoise is now 96% of it.
 
 The measurements below predate the device VAE and are kept for the comparisons they
 support. They used `moe_kernel: torch`, and the third warm generation:
@@ -373,6 +387,48 @@ The other 31 cores are unchanged. Most of the growth is the stage NEFFs' instruc
 and a larger scratchpad, not the 5.0 GiB of decoder tensors the standalone check measured,
 so measure with `neuron-monitor` rather than adding up weights.
 
+**float16, on a core of its own.** float16 carries three more mantissa bits than
+bfloat16 at the same width, and here that is worth 7x: on the real-image check the frame
+error falls from 1.31e-02 to 1.47e-03, PSNR to the host decode rises from 58.71 dB to
+66.50 dB, pixels identical to the host from 76.85% to 95.71%, at most 1/255 off. In the
+pipeline it is 66.41 dB against 58.92. The time is no worse -- 1.6-1.8 s against 2.5 s
+for bfloat16, a difference in how the two dtypes compiled rather than anything the dtype
+itself buys.
+
+Its range is the risk. On the host in float32, the decoder's activations peak at 26 / 18 /
+55 / 1270 / **9559 / 9721** / 6.6 across the seven stages (the same within 2% on a second,
+very different image) -- 6.7x inside float16's 65504. But a GroupNorm squares its centred
+input, and anything past 256 squares past 65504. On device the current compiler happened
+to keep that square in float32 (a GroupNorm fed values up to 3e4 stayed finite), but
+eager float16 on the CPU overflows exactly as the arithmetic says it should, and nothing
+guaranteed the compiler would keep doing that. So the float16 GroupNorm scales each group
+by a power of two that brings `|x - mean|` to at most 1 before centring, and normalises
+the scaled values directly; the result is scale-invariant once `eps` is scaled with it.
+A power of two is exact, so this adds no rounding -- on device it matches the unscaled
+version to the digit (6.06e-04 / 6.33e-04 / 6.28e-04 against float32 at peaks of 200 /
+9700 / 30000) -- and nothing larger than 1 is ever squared.
+
+It does not fit beside the backbone. The runtime keeps far more of the decoder resident
+than its 1.6 GiB of weights: the seven stage NEFFs' code and DMA rings (4.5 GiB), a shared
+scratchpad sized by the largest stage (5.75 GiB in float16, where `up3` compiles to 0.75
+GiB more than in bfloat16), and an output buffer per stage that stays allocated between
+decodes (2.8 GiB). That last part is below PyTorch: no Python object references it,
+`empty_cache()` does not return it, and a second decode reuses it rather than growing. The
+first request loads the stages one at a time, so it fits; the second has all seven
+resident, and float16 then failed to allocate `up3`'s 1 GiB output on the output rank's
+core (`nrt_tensor_allocate`, 21.3 GiB in use). bfloat16 had fitted with less to spare than
+the 4.1 GiB measured above suggested -- `neuron-monitor` at 2 s intervals misses the
+transient peak.
+
+So the decoder now runs in a worker process (`vae_worker.py`) on a core outside the stage's
+`devices` range, which a TP32 deployment leaves idle. The output rank starts it on the
+first request (36 s to load the decoder and attach the core), sends each request's
+latents over a pipe and gets the float32 frame back; the transfer is inside the 1.84 s. It
+builds the same `StagedDeviceDecoder` from the same file, so it hits the same NEFFs. The
+VAE core peaks at **14.72 GiB of 24**, and every backbone core, the output rank's
+included, is back to 7.76 GiB. The worker exits when the pipe closes, so it cannot outlive
+the server.
+
 **The NEFF cache is keyed on source lines, not just on the graph.** torch-mlir attaches
 each op's location -- the absolute path and line of every traced frame -- to the MLIR, and
 the cache key is a hash of that MLIR. Moving the stage functions out of the check script
@@ -415,7 +471,9 @@ head it loaded (the replicated-KV grouping, which only matters when
 `test/unit/test_hunyuan_image3_vae_device.py` checks the staged decode on a small random
 VAE of the same architecture, on CPU: the seven stages run back to back equal
 `vae.decode` exactly (frame selection included), and the float32-statistics GroupNorm and
-attention match the stock modules to 5.3e-07 in float32.
+attention match the stock modules to 5.3e-07 in float32. In float16 at a peak of 9700 --
+where the test first confirms the naive square overflows -- the GroupNorm stays finite
+and within 5.6e-04 of float32, and a constant group gives its bias rather than inf * 0.
 
 `examples/hunyuan_image3/check_nki_kernels.py` compiles each NKI kernel on its own, at
 the shapes the real model runs, and diffs it against the torch fallback. On device at
@@ -441,13 +499,16 @@ generates what the prompt asks for" — not quality parity with the reference de
   costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
-- The VAE decode runs on the output rank's core only, not across ranks (2.5 s at
-  1024x1024). Images over 1024 on either side decode on the host (29 s), because the NKI
-  convolution's spatial range ends there and the device decoder has released the torch
-  weights those sites would need.
-- Each resolution the device VAE decodes is seven more NEFFs: ~47 min to precompile at
-  1024x1024 with `compile_vae_stages.py`, ~2 hours if the first request compiles them.
-  The output rank's core has 4.1 GiB left with one resolution resident.
+- The device VAE needs one more NeuronCore than the stage's `devices` (`vae_device_core`).
+  Without one, leave `vae_device_core` unset and set `vae_device_dtype: bfloat16`: it then
+  shares the output rank's core, which bfloat16 fits beside and float16 does not.
+- The VAE decode runs on one core, not across ranks (1.8 s at 1024x1024). Images over
+  1024 on either side decode on the host (29 s), because the NKI convolution's spatial
+  range ends there and the device decoder has released the torch weights those sites
+  would need.
+- Each resolution and dtype the device VAE decodes is seven more NEFFs: ~30-47 min to
+  precompile at 1024x1024 with `compile_vae_stages.py`, ~2 hours if the first request
+  compiles them. One resolution in float16 holds 14.7 GiB of the VAE core's 24.
 - The NEFF cache key includes source paths and line numbers (see
   [Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device)), so a
   cache saved from one checkout is only reused by the same files at the same path.

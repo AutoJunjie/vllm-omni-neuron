@@ -15,7 +15,7 @@ down with the Neuron execution path:
 * the scheduler, the CFG combine and the token embedding stay on the host, so no
   uncompiled op is ever dispatched to the device under the Lite runtime;
 * the VAE decode runs on the host in float32 by default, or with ``vae_device: neuron``
-  on the output rank's core as seven staged bfloat16 graphs (:mod:`.vae_device`).
+  on the output rank's core as seven staged float16 graphs (:mod:`.vae_device`).
 
 This is the DiT-only deployment: the prompt goes straight to the diffusion stage with
 no autoregressive recaption stage, matching upstream's
@@ -208,7 +208,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         self.prefill_len = int(model_config.get("prefill_len", default_prefill_len()))
         self.vae_dtype = getattr(torch, str(model_config.get("vae_dtype", "float32")))
         # Where the output rank decodes. `cpu` is the float32 reference; `neuron` puts the
-        # decoder on this rank's core in bfloat16 with float32 reductions, ~11x faster.
+        # decoder on this rank's core in 16 bits (vae_device_dtype) with fp32 reductions.
         self.vae_device = str(model_config.get("vae_device", "cpu"))
         if self.vae_device not in ("cpu", "neuron"):
             raise ValueError(f"vae_device must be 'cpu' or 'neuron', got {self.vae_device!r}")
@@ -802,22 +802,42 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         """The staged on-device decoder, built on first use. Output rank only.
 
         Built lazily rather than at load time because only the output rank decodes, and
-        its graphs compile on the first call for each latent shape anyway.
+        its graphs compile on the first call for each latent shape anyway. With
+        ``vae_device_core`` set it runs in a worker process on that core
+        (:mod:`.vae_worker`); otherwise on this rank's own core, next to its backbone
+        shard -- which float16 does not fit beside.
         """
         if self._device_vae_decoder is None:
-            from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (
-                StagedDeviceDecoder,
-            )
+            # float16 is the default: same speed as bfloat16, 66 dB PSNR to the host
+            # decode against 59. Read here, below the traced functions, so the options
+            # do not move their lines (and with them the denoise graph's cache key).
+            model_config = dict(self.od_config.model_config or {})
+            dtype = str(model_config.get("vae_device_dtype", "float16"))
+            if dtype not in ("float16", "bfloat16"):
+                raise ValueError(f"vae_device_dtype must be float16 or bfloat16, got {dtype!r}")
+            core = model_config.get("vae_device_core")
+            if core is not None:
+                from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_worker import (
+                    RemoteDeviceDecoder,
+                )
 
-            self._device_vae_decoder = StagedDeviceDecoder(
-                self.vae, self.hf_config.vae, self.device
-            )
+                self._device_vae_decoder = RemoteDeviceDecoder(
+                    self._resolve_model_path(), self.hf_config.vae, int(core), dtype
+                )
+            else:
+                from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (
+                    StagedDeviceDecoder,
+                )
+
+                self._device_vae_decoder = StagedDeviceDecoder(
+                    self.vae, self.hf_config.vae, self.device, dtype=getattr(torch, dtype)
+                )
         return self._device_vae_decoder
 
     def _decode_impl(self, latents: torch.Tensor, generator, VaeImageProcessor):
         vae_config = self.vae.config
         on_device = self.vae_device == "neuron"
-        # The device decoder casts to bfloat16 itself; scale in float32 before it does.
+        # The device decoder casts to its own dtype; scale in float32 before it does.
         latents = latents.to(dtype=torch.float32 if on_device else self.vae_dtype)
         if getattr(vae_config, "scaling_factor", None):
             latents = latents / vae_config.scaling_factor
@@ -826,7 +846,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         temporal = hasattr(self.vae, "ffactor_temporal")
         if temporal:
             latents = latents.unsqueeze(2)
-        decoder = self._device_decoder() if on_device else None
+        decoder = None
+        if on_device:
+            try:
+                decoder = self._device_decoder()
+            except Exception:
+                logger.exception("HunyuanImage3: device VAE unavailable; using the host")
         if decoder is not None and not decoder.supports(latents):
             logger.warning(
                 "HunyuanImage3: latents %s exceed the device VAE's spatial range; "
@@ -834,12 +859,19 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 tuple(latents.shape),
             )
             decoder = None
-            latents = latents.to(dtype=self.vae_dtype)
+        image = None
         with torch.no_grad():
             if decoder is not None:
-                image = decoder.decode(latents)
-            else:
-                image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
+                try:
+                    image = decoder.decode(latents)
+                except Exception:
+                    # A failed device decode (a dead worker, device OOM) costs this request
+                    # the host decode's 29 s, not the image; the next request rebuilds.
+                    logger.exception("HunyuanImage3: device VAE decode failed; using the host")
+                    self._device_vae_decoder = None
+            if image is None:
+                host_latents = latents.to(dtype=self.vae_dtype)
+                image = self.vae.decode(host_latents, return_dict=False, generator=generator)[0]
         if temporal:
             image = image.squeeze(2)
 
