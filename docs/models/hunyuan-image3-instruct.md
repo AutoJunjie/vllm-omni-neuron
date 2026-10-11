@@ -13,9 +13,11 @@ torch.compile, libtorch-neuronx-lite -->
 
 [`tencent/HunyuanImage-3.0-Instruct`](https://huggingface.co/tencent/HunyuanImage-3.0-Instruct)
 is an 80B-parameter mixture-of-experts diffusion transformer that generates images
-from text. This plugin serves its **DiT stage only**: the prompt goes straight to the
-diffusion stage, with no autoregressive recaption stage in front of it. That is the
-same scope as upstream vLLM-Omni's `vllm_omni/deploy/hunyuan_image3_dit.yaml`.
+from text. By default the prompt goes straight to the diffusion stage, the same scope as
+upstream vLLM-Omni's `vllm_omni/deploy/hunyuan_image3_dit.yaml`. A request with
+`bot_task` `think`, `recaption` or `think_recaption` first generates that text on the
+same backbone and then conditions the image on it -- see
+[Think / recaption (AR + DiT)](#think--recaption-ar--dit).
 
 Registered architecture key: `HunyuanImage3ForCausalMM` — the Neuron pipeline replaces
 upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
@@ -446,6 +448,59 @@ seven took 47 min wall at 1024x1024 (1 s for the cached `in+mid`, then
 115 / 891 / 1559 / 2741 / 2263 / 116 s), against ~2 hours in series.
 
 
+## Think / recaption (AR + DiT)
+
+Upstream runs the text generation as a separate LLM stage on separate devices (AR, then
+DiT, joined by a KV connector). Here it runs on the DiT's own 32 cores and weights, in
+`hunyuan_image3_ar.py`, before the denoise loop: the existing prompt prefill over the
+prompt minus its last token, then a one-token decode graph replayed per token. The decode
+step's generated-K/V cache is a fixed `[1, ar_max_new_tokens, kv_heads, head_dim]` buffer
+per layer, updated as `cache * (1 - onehot) + new * onehot` -- exact for a one-hot, and
+not an in-graph slice write, the construct that broke `neuronx-cc`'s MaskPropagation pass
+in this backbone's MoE. The position, RoPE row and visible key range arrive as inputs, so
+the graph never changes shape. The decode MoE evaluates the rank's two local experts
+densely (the blockwise kernel would pad one token to a 1024-row block), and the LM head is
+vocab-parallel: each rank holds 4160 rows and one all-reduce of the zero-padded shards
+gives every rank the full logits, so all ranks take the same greedy token.
+
+The protocol follows upstream's AR stage: `prompt_utils.build_prompt_tokens` builds the
+prompt (`en_unified` system prompt, `User:`/`Assistant:` turns, trigger tag), decoding is
+greedy as in `deploy/hunyuan_image3_ar.yaml`, the stop tokens come from
+`resolve_stop_token_ids` for an explicit size, `</think>` forces `<recaption>` under
+`think_recaption`, and the text is truncated at the closing tag and handed to the DiT as
+`ar_generated_text` with `bot_task` back to `auto`, as `ar2diffusion` does.
+
+```bash
+python examples/hunyuan_image3/run.py --bot-task think \
+  --stage-config examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml
+```
+
+`hunyuan_image3_stage_ar.yaml` is the default stage config with `prefill_len: 2560`
+(the AR prompt is 1257 tokens, and the DiT prompt then carries the generated text too) and
+`ar_max_new_tokens: 1024`.
+
+Measured 2026-10-11, 1024x1024, 50 steps, CFG 2.5, seed 42, the prompt "A cozy wooden
+cabin in a snowy pine forest at dusk, warm yellow light glowing from the windows, smoke
+rising from the chimney", `bot_task: think`, warm (`run.py --profile --runs 2`):
+
+| Stage | trn2 (this pipeline) | H100 x8, upstream 4+4 (2026-09-30) |
+| --- | ---: | ---: |
+| AR prompt / generated tokens | 1257 / 547 | 1257 / 548 |
+| AR (prefill + decode) | **8.80 s** (15.5 ms / token) | 35.85 s (65.4 ms / token) |
+| DiT denoise, 50 steps | 49.68 s (0.994 / step, CFG 2.5) | 6.03 s with the VAE (`guidance_scale: 0`, no CFG) |
+| VAE decode | 1.87 s | (in the line above) |
+| End to end | **60.56 s** (60.55 / 60.57) | 41.98 s |
+
+The AR is ~4x faster than H100 here: batch-1 decode is bandwidth-bound and 32 cores split
+the weights 32 ways. The DiT is what remains slow -- 0.994 s/step against 0.90 for the
+DiT-only prompt, because the prompt now carries ~550 more tokens -- and the H100 row ran
+without CFG, half the per-step work. The image follows the generated text (trees framing
+the scene, weathered logs, warm light on the snow, chimney smoke). The first AR request
+compiles the decode graph and the 2560-token prefill and denoise graphs: 1314 s cold.
+
+`test/unit/test_hunyuan_image3_ar_decode.py` checks the decode step against a full causal
+forward of the reference math on CPU, token by token: 4.9e-07 relative, same argmax.
+
 ## Validation
 
 `test/unit/test_hunyuan_image3_numerics.py` builds a tiny random checkpoint in the real
@@ -499,6 +554,9 @@ generates what the prompt asks for" — not quality parity with the reference de
   costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
+- The AR is greedy only, for an explicit image size (no `auto` aspect-ratio prediction),
+  one request at a time, and serial with the DiT on the same cores rather than pipelined.
+  Its numerics are checked against the reference math, not against an H100 token stream.
 - The device VAE needs one more NeuronCore than the stage's `devices` (`vae_device_core`).
   Without one, leave `vae_device_core` unset and set `vae_device_dtype: bfloat16`: it then
   shares the output rank's core, which bfloat16 fits beside and float16 does not.

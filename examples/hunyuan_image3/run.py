@@ -72,6 +72,14 @@ parser.add_argument(
     help="MoE MLP implementation. Default comes from the stage config (nki).",
 )
 parser.add_argument(
+    "--bot-task",
+    choices=["think", "recaption", "think_recaption"],
+    default=None,
+    help="Generate think / recaption text on the backbone before the image (AR + DiT). "
+    "Needs a stage config with a prefill bucket that fits the system prompt plus the "
+    "generated text, e.g. hunyuan_image3_stage_ar.yaml.",
+)
+parser.add_argument(
     "--vae-device",
     choices=["neuron", "cpu"],
     default=None,
@@ -167,16 +175,19 @@ def main() -> None:
         )
     params = OmniDiffusionSamplingParams(**sampling_kwargs)
 
-    print(f"Generating {args.width}x{args.height}, {steps} steps")
+    request = {"prompt": args.prompt}
+    if args.bot_task is not None:
+        request["bot_task"] = args.bot_task
+    print(f"Generating {args.width}x{args.height}, {steps} steps, bot_task={args.bot_task}")
     start = time.perf_counter()
-    result = omni.generate({"prompt": args.prompt}, params)
+    result = omni.generate(request, params)
     print(f"First (cold) generation: {time.perf_counter() - start:.2f}s")
 
     if args.profile:
         times = []
         for run in range(args.runs):
             start = time.perf_counter()
-            result = omni.generate({"prompt": args.prompt}, params)
+            result = omni.generate(request, params)
             elapsed = time.perf_counter() - start
             times.append(elapsed)
             print(f"[profile] run {run + 1}/{args.runs}: {elapsed:.2f}s")

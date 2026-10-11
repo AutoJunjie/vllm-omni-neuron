@@ -459,6 +459,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         ]
         kwargs.setdefault("fullgraph", True)
         kwargs.setdefault("dynamic", False)
+        # Kept for graphs built later, on first use (the AR decode step).
+        self._compile_settings = (args, options, kwargs)
         self.model.compile(*args, options=options, **kwargs)
         self._compiled_denoise_step = torch.compile(
             self._denoise_step_graph,
@@ -632,6 +634,33 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 "conditioning images are not supported."
             )
         prompt = prompt_from_req or prompt
+        from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_ar import (
+            AR_BOT_TASKS,
+        )
+
+        self._ar_stats = None
+        bot_task = extra_args.get("bot_task")
+        first = req.prompts[0] if req.prompts else None
+        if bot_task is None and isinstance(first, dict):
+            bot_task = first.get("bot_task")
+        if bot_task in AR_BOT_TASKS and not any(text is not None for text in cot_text_list):
+            # Think / recaption on the same backbone first; the DiT then conditions on
+            # the text, as upstream's ar2diffusion hands it over (bot_task back to auto).
+            text_prompt = prompt[0] if isinstance(prompt, list) else prompt
+            self._ar_stats = self._ar_generator().generate(text_prompt, bot_task)
+            if self.is_output_rank:
+                logger.info(
+                    "HunyuanImage3 AR (%s): %d prompt + %d generated tokens, %.2f s decode, "
+                    "%s s/token: %r",
+                    bot_task,
+                    self._ar_stats["prompt_tokens"],
+                    self._ar_stats["generated_tokens"],
+                    self._ar_stats["decode_seconds"],
+                    self._ar_stats["seconds_per_token"],
+                    self._ar_stats["text"][:2000],
+                )
+            cot_text_list = [self._ar_stats["text"]]
+            tokenizer_bot_task = "auto"
         cot_text = (
             [self._normalize_cot_text(text) for text in cot_text_list]
             if any(text is not None for text in cot_text_list)
@@ -680,6 +709,22 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             custom_output["ar_generated_text"] = cot_text_list[0]
         self._record_perf_metrics(steps=steps, height=height, width=width, e2e=elapsed)
         return DiffusionOutput(output=image, custom_output=custom_output)
+
+    def _ar_generator(self):
+        """The think / recaption generator, built on the first AR request. Every rank."""
+        if getattr(self, "_ar", None) is None:
+            from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_ar import (
+                NeuronHunyuanImage3AR,
+            )
+
+            model_config = dict(self.od_config.model_config or {})
+            self._ar = NeuronHunyuanImage3AR(
+                self,
+                self._resolve_model_path(),
+                max_new_tokens=int(model_config.get("ar_max_new_tokens", 1024)),
+                compile_kwargs=getattr(self, "_compile_settings", None),
+            )
+        return self._ar
 
     def _generate_image(self, model_inputs: dict[str, Any], *, steps: int, guidance: float):
         config = self.hf_config
@@ -901,6 +946,16 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             "vae_device": self.vae_device,
             "lite_runtime": is_lite_runtime(),
         }
+        ar = getattr(self, "_ar_stats", None)
+        if ar is not None:
+            metrics.update(
+                ar_prompt_tokens=ar["prompt_tokens"],
+                ar_generated_tokens=ar["generated_tokens"],
+                ar_prefill_seconds=ar["prefill_seconds"],
+                ar_decode_seconds=ar["decode_seconds"],
+                ar_seconds_per_token=ar["seconds_per_token"],
+                ar_stopped=ar["stopped"],
+            )
         self._last_perf_metrics = metrics
         if not self.is_output_rank:
             return
