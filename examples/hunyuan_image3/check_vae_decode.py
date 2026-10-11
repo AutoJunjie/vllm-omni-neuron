@@ -55,25 +55,23 @@ os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "600")
 
 import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
-import torch.nn as nn  # noqa: E402
 
 torch.nn.functional.gelu = torch.ops.aten.gelu.default
 
 from vllm.transformers_utils.config import get_config  # noqa: E402
 from vllm_neuron.envs import get_compile_backend_name  # noqa: E402
 
+from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (  # noqa: E402
+    COMPILER_ARGS,
+    compile_stage,
+    decoder_stages,
+    install_fp32_attention,
+    install_fp32_norms,
+)
 from vllm_omni_neuron.lite_compat import (  # noqa: E402
     ensure_current_device_index,
     initialize as initialize_lite,
 )
-
-_COMPILER_ARGS = [
-    "--model-type=unet-inference",
-    "--auto-cast=none",
-    "--internal-max-instruction-limit=20000000",
-    "-O1",
-    "--hbm-scratchpad-page-size=2048",
-]
 
 parser = argparse.ArgumentParser(description="HunyuanImage-3.0 VAE decode on device")
 parser.add_argument("--model-path", default="/workspace/models/HunyuanImage-3.0-Instruct")
@@ -275,136 +273,10 @@ def _count_conv_splits(vae, latents):
     return stats
 
 
-def _install_fp32_norms(vae) -> int:
-    """Compute every decoder GroupNorm's statistics in float32, output in the input dtype.
-
-    This is the half of ``torch.autocast`` that matters here, and the reason bfloat16
-    produced a garbage image: the failure is the *reduction*, not the mantissa. A single
-    convolution is only 3.2e-03 off in bfloat16, which 44 layers cannot compound into a
-    98% error; a GroupNorm can, twice over. Its last level reduces 4 channels x 4 frames
-    x 1024^2 ~ 16.8M elements, and a low-precision running sum stops absorbing new terms
-    once it exceeds them by ~256x, so the mean and variance come out badly wrong. And
-    computing the variance as ``E[x^2] - E[x]^2`` cancels catastrophically when the mean
-    dominates, which can drive it to zero or negative before ``rsqrt``.
-
-    So: accumulate in float32 via ``mean(dtype=torch.float32)``, which upcasts during the
-    reduction without materialising a float32 copy of ``x`` -- ``x.float()`` would add a
-    2.1 GiB temporary at the largest level, which is what put float32 out of memory in
-    the first place. Two passes rather than ``E[x^2] - E[x]^2``, with the centring done
-    in the input dtype: that rounds each term relative to its own magnitude, so the
-    residual bias on the variance is ~(7.8e-03)^2/3, negligible, where cancellation is
-    not. ``eps`` is added in float32, which also keeps it off float16's subnormal range
-    (1e-6 is below float16's smallest normal, 6.1e-5).
-    """
-
-    def forward(self, x):
-        shape = x.shape
-        batch, channels = shape[0], shape[1]
-        grouped = x.reshape(batch, self.num_groups, channels // self.num_groups, *shape[2:])
-        dims = tuple(range(2, grouped.dim()))
-
-        mean = grouped.mean(dim=dims, keepdim=True, dtype=torch.float32)
-        centred = grouped - mean.to(x.dtype)
-        variance = centred.pow(2).mean(dim=dims, keepdim=True, dtype=torch.float32)
-        scale = torch.rsqrt(variance + self.eps).to(x.dtype)
-
-        normalised = (centred * scale).reshape(shape)
-        affine_shape = (1, channels) + (1,) * (len(shape) - 2)
-        return normalised * self.weight.reshape(affine_shape).to(x.dtype) + self.bias.reshape(
-            affine_shape
-        ).to(x.dtype)
-
-    installed = 0
-    for module in vae.decoder.modules():
-        if isinstance(module, nn.GroupNorm):
-            module.forward = forward.__get__(module, type(module))
-            installed += 1
-    return installed
-
-
-def _install_fp32_attention(vae) -> int:
-    """Run the mid block's attention softmax in float32, leaving its 1x1 convs alone.
-
-    The softmax is another low-precision reduction whose accumulation dtype this side
-    cannot confirm, so it gets the same treatment as the GroupNorm statistics. Only the
-    reduction is upcast: casting the module's parameters instead fails outright, because
-    Lite device tensors cannot be restrided or retyped in place (``Expected self.dtype()
-    == dst.dtype()``), and it would not be the part that matters anyway. The block runs
-    at 64x64, inside a stage that is 0.24 s of a 29 s decode.
-    """
-    from einops import rearrange
-
-    def attention(self, hidden):
-        hidden = self.norm(hidden)
-        query, key, value = self.q(hidden), self.k(hidden), self.v(hidden)
-        batch, channels, frames, height, width = query.shape
-        pattern = "b c f h w -> b 1 (f h w) c"
-        query = rearrange(query, pattern).contiguous().float()
-        key = rearrange(key, pattern).contiguous().float()
-        value = rearrange(value, pattern).contiguous().float()
-        attended = nn.functional.scaled_dot_product_attention(query, key, value)
-        attended = attended.to(hidden.dtype)
-        return rearrange(
-            attended,
-            "b 1 (f h w) c -> b c f h w",
-            f=frames,
-            h=height,
-            w=width,
-            c=channels,
-            b=batch,
-        )
-
-    installed = 0
-    for module in vae.decoder.modules():
-        if type(module).__name__ == "AttnBlock":
-            module.attention = attention.__get__(module, type(module))
-            installed += 1
-    return installed
-
-
 def _relative_error(actual, expected):
     """Max absolute difference, relative to the signal it is measured against."""
     scale = expected.abs().max().item()
     return (actual - expected).abs().max().item() / max(scale, 1e-12)
-
-
-def _decoder_stages(vae):
-    """Split ``vae.decoder.forward`` into sequential stages, in execution order.
-
-    Boundaries follow the chain the decoder already is: ``conv_in`` plus its
-    repeat_interleave skip and the three middle blocks, then one stage per upsample
-    level, then the output head. Each stage is a plain callable over one tensor, so a
-    stage can be compiled, timed and failed independently of the others.
-    """
-    from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import swish
-
-    decoder = vae.decoder
-    stages = []
-
-    def stage_in(z):
-        repeats = decoder.block_out_channels[0] // decoder.z_channels
-        h = decoder.conv_in(z) + z.repeat_interleave(repeats=repeats, dim=1)
-        h = decoder.mid.block_1(h)
-        h = decoder.mid.attn_1(h)
-        return decoder.mid.block_2(h)
-
-    stages.append(("in+mid", stage_in))
-
-    for i_level in range(len(decoder.block_out_channels)):
-        def stage_level(h, level=decoder.up[i_level]):
-            for block in level.block:
-                h = block(h)
-            if hasattr(level, "upsample"):
-                h = level.upsample(h)
-            return h
-
-        stages.append((f"up{i_level}", stage_level))
-
-    def stage_out(h):
-        return decoder.conv_out(swish(decoder.norm_out(h)))
-
-    stages.append(("out", stage_out))
-    return stages
 
 
 def _instruction_count(message):
@@ -422,8 +294,8 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
     activation for that boundary, so a single run characterises every stage instead of
     stopping at the first failure.
     """
-    host_stages = _decoder_stages(vae)
-    device_stages = _decoder_stages(device_vae)
+    host_stages = decoder_stages(vae)
+    device_stages = decoder_stages(device_vae)
 
     # Host pass, keeping each boundary activation as both a timing reference and the
     # input a skipped stage's successor needs.
@@ -444,16 +316,7 @@ def _run_staged(vae, device_vae, latents, dtype, device, reference):
     rows = []
     carried = latents.to(dtype).to(device)
     for index, (name, fn) in enumerate(device_stages):
-        compiled = torch.compile(
-            fn,
-            backend=get_compile_backend_name(),
-            fullgraph=True,
-            dynamic=False,
-            options={
-                "model_name": f"hunyuan_image3_vae_decode_{name}",
-                "compiler_args": _COMPILER_ARGS,
-            },
-        )
+        compiled = compile_stage(name, fn)
         try:
             start = time.perf_counter()
             out = compiled(carried)
@@ -604,8 +467,8 @@ def main() -> None:
 
     if args.fp32_norms:
         print(
-            f"float32 reductions: {_install_fp32_norms(device_vae)} GroupNorm statistics, "
-            f"{_install_fp32_attention(device_vae)} attention block(s)"
+            f"float32 reductions: {install_fp32_norms(device_vae)} GroupNorm statistics, "
+            f"{install_fp32_attention(device_vae)} attention block(s)"
         )
 
     if args.nki_conv:
@@ -660,7 +523,7 @@ def main() -> None:
         dynamic=False,
         options={
             "model_name": "hunyuan_image3_vae_decode",
-            "compiler_args": _COMPILER_ARGS,
+            "compiler_args": COMPILER_ARGS,
         },
     )
 

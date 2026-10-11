@@ -12,8 +12,10 @@ down with the Neuron execution path:
 * the DiT runs as **two** fixed-shape ``torch.compile`` graphs — a prompt prefill that
   emits the per-layer prompt K/V, and a denoise step that fuses the patch embedder, the
   backbone and the final layer into one NEFF replayed every scheduler step;
-* the scheduler, the CFG combine, the token embedding and the VAE decode stay on the
-  host, so no uncompiled op is ever dispatched to the device under the Lite runtime.
+* the scheduler, the CFG combine and the token embedding stay on the host, so no
+  uncompiled op is ever dispatched to the device under the Lite runtime;
+* the VAE decode runs on the host in float32 by default, or with ``vae_device: neuron``
+  on the output rank's core as seven staged bfloat16 graphs (:mod:`.vae_device`).
 
 This is the DiT-only deployment: the prompt goes straight to the diffusion stage with
 no autoregressive recaption stage, matching upstream's
@@ -205,6 +207,11 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         model_config = dict(od_config.model_config or {})
         self.prefill_len = int(model_config.get("prefill_len", default_prefill_len()))
         self.vae_dtype = getattr(torch, str(model_config.get("vae_dtype", "float32")))
+        # Where the output rank decodes. `cpu` is the float32 reference; `neuron` puts the
+        # decoder on this rank's core in bfloat16 with float32 reductions, ~11x faster.
+        self.vae_device = str(model_config.get("vae_device", "cpu"))
+        if self.vae_device not in ("cpu", "neuron"):
+            raise ValueError(f"vae_device must be 'cpu' or 'neuron', got {self.vae_device!r}")
         use_nki_mlp = nki_mlp_enabled(model_config)
         use_nki_attention = nki_attention_enabled(model_config)
         moe_block_size = int(model_config.get("moe_block_size", 1024))
@@ -253,9 +260,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             out_norm=True,
         )
 
-        # The token embedding and the VAE stay on the host: the embedding is a single
-        # gather over a 133k x 4096 table (1.1 GB that would otherwise be replicated on
-        # every core), and the VAE decodes once per request.
+        # The token embedding and the VAE weights stay on the host: the embedding is a
+        # single gather over a 133k x 4096 table (1.1 GB that would otherwise be
+        # replicated on every core), and the VAE decodes once per request, on one rank.
+        # With vae_device=neuron that rank copies the decoder onto its core on first use.
         self.wte = nn.Embedding(int(config.vocab_size), hidden_size)
         self.vae = self._build_vae(config)
         self.vae.to(self.vae_dtype)
@@ -268,6 +276,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
         )
         self._compiled_denoise_step = None
+        self._device_vae_decoder = None
         self._stage_seconds: dict[str, float] = {}
         self._last_perf_metrics: dict | None = None
         self._guidance_scale = None
@@ -774,7 +783,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         return image
 
     def _decode(self, latents: torch.Tensor, generator):
-        """Decode latents to a PIL image on the host. Output rank only."""
+        """Decode latents to a PIL image, on the host or this rank's core. Output rank only."""
         from diffusers.image_processor import VaeImageProcessor
 
         # The Lite worker pins torch to one thread so N workers do not oversubscribe the
@@ -789,9 +798,27 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         finally:
             torch.set_num_threads(previous_threads)
 
+    def _device_decoder(self):
+        """The staged on-device decoder, built on first use. Output rank only.
+
+        Built lazily rather than at load time because only the output rank decodes, and
+        its graphs compile on the first call for each latent shape anyway.
+        """
+        if self._device_vae_decoder is None:
+            from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (
+                StagedDeviceDecoder,
+            )
+
+            self._device_vae_decoder = StagedDeviceDecoder(
+                self.vae, self.hf_config.vae, self.device
+            )
+        return self._device_vae_decoder
+
     def _decode_impl(self, latents: torch.Tensor, generator, VaeImageProcessor):
         vae_config = self.vae.config
-        latents = latents.to(dtype=self.vae_dtype)
+        on_device = self.vae_device == "neuron"
+        # The device decoder casts to bfloat16 itself; scale in float32 before it does.
+        latents = latents.to(dtype=torch.float32 if on_device else self.vae_dtype)
         if getattr(vae_config, "scaling_factor", None):
             latents = latents / vae_config.scaling_factor
         if getattr(vae_config, "shift_factor", None):
@@ -799,8 +826,20 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         temporal = hasattr(self.vae, "ffactor_temporal")
         if temporal:
             latents = latents.unsqueeze(2)
+        decoder = self._device_decoder() if on_device else None
+        if decoder is not None and not decoder.supports(latents):
+            logger.warning(
+                "HunyuanImage3: latents %s exceed the device VAE's spatial range; "
+                "decoding this request on the host",
+                tuple(latents.shape),
+            )
+            decoder = None
+            latents = latents.to(dtype=self.vae_dtype)
         with torch.no_grad():
-            image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
+            if decoder is not None:
+                image = decoder.decode(latents)
+            else:
+                image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
         if temporal:
             image = image.squeeze(2)
 
@@ -827,6 +866,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             "height": height,
             "width": width,
             "prefill_len": self.prefill_len,
+            "vae_device": self.vae_device,
             "lite_runtime": is_lite_runtime(),
         }
         self._last_perf_metrics = metrics

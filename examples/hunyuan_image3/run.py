@@ -72,6 +72,12 @@ parser.add_argument(
     help="MoE MLP implementation. Default comes from the stage config (nki).",
 )
 parser.add_argument(
+    "--vae-device",
+    choices=["neuron", "cpu"],
+    default=None,
+    help="Where the VAE decodes. Default comes from the stage config (neuron).",
+)
+parser.add_argument(
     "--platform-target",
     choices=["trn2", "trn3"],
     default=None,
@@ -123,6 +129,8 @@ def main() -> None:
         model_config["prefill_len"] = args.prefill_len
     if args.moe_kernel is not None:
         model_config["moe_kernel"] = args.moe_kernel
+    if args.vae_device is not None:
+        model_config["vae_device"] = args.vae_device
 
     # A cold compile of the 80B MoE denoise graph runs far past vllm-omni's 600 s
     # worker handshake, so raise the ceiling before Omni starts the orchestrator.

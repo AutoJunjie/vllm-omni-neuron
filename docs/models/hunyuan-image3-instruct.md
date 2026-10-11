@@ -7,7 +7,7 @@ configurations, the two-graph execution model, NKI kernels, and known limits. --
 HunyuanImage3ForCausalMM, text-to-image, DiT, MoE, expert parallelism, NKI,
 torch.compile, libtorch-neuronx-lite -->
 <!-- meta: content_type: reference -->
-<!-- meta: date_updated: 2026-10-09 -->
+<!-- meta: date_updated: 2026-10-11 -->
 
 ## Overview
 
@@ -72,9 +72,16 @@ attention — and those columns are masked out of every denoise step by additive
 biases read straight out of that same generation mask. The timestep token and the image
 tokens get one bias each, because the mask gives them different visibility.
 
-The scheduler, the CFG combine, the 133k x 4096 token embedding and the VAE decode stay
-on the host. That keeps a 1.1 GB table off every core, and means no uncompiled operation
-is ever dispatched to the device under the Lite runtime.
+The scheduler, the CFG combine and the 133k x 4096 token embedding stay on the host.
+That keeps a 1.1 GB table off every core, and means no uncompiled operation is ever
+dispatched to the device under the Lite runtime.
+
+The VAE decode runs on the output rank's core by default (`model_config.vae_device:
+neuron`), as seven staged bfloat16 graphs with float32 reductions -- see
+[Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device).
+`vae_device: cpu` decodes on the host in float32 (`vae_dtype`), which is the reference;
+the device path also falls back to it for any image wider or taller than 1024, past the
+NKI convolution's spatial range.
 
 ### NKI kernels
 
@@ -143,6 +150,16 @@ curl -s http://localhost:8091/v1/chat/completions \
   | cut -d',' -f2- | base64 -d > hunyuan_image3_output.png
 ```
 
+`run.py --vae-device cpu` overrides the stage config's VAE placement for one run.
+
+A cold NEFF cache means the first request at a resolution compiles the VAE's seven stage
+graphs in series inside that request, ~2 hours at 1024x1024. Compile them in parallel
+beforehand instead -- one process per stage on cores 0-6, so stop the server first:
+
+```bash
+python examples/hunyuan_image3/compile_vae_stages.py --height 1024 --width 1024
+```
+
 Per-request stage timings are written to
 `$WORKLOAD_OUTPUT_RW/metrics/pipeline_perf_metrics.json` (`/tmp/metrics/...` by default):
 `prefill_seconds`, `denoise_seconds`, `seconds_per_step`, `vae_decode_seconds` and
@@ -150,10 +167,28 @@ Per-request stage timings are written to
 
 ## Measured performance
 
-One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, `moe_kernel: torch`,
-CFG batch of 2 (`guidance_scale` 2.5).
+One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16, CFG batch of 2
+(`guidance_scale` 2.5), default stage config (`moe_kernel: nki`, `vae_device: neuron`).
+Measured 2026-10-11, from `pipeline_perf_metrics.json` on warm generations, against the
+same build with `--vae-device cpu`:
 
-Steady state, from `pipeline_perf_metrics.json` on the third warm generation:
+| Stage | `vae_device: neuron` | `vae_device: cpu` |
+| --- | ---: | ---: |
+| Prompt prefill | 0.04 s | 0.03 s |
+| Denoise (50 steps) | 45.01 s (0.900 / step) | 45.08 s (0.902 / step) |
+| VAE decode | **2.49 s** (device, bfloat16) | 29.17 s (host, float32) |
+| End to end (`e2e_forward_seconds`) | **47.59 s** | 74.34 s |
+| `run.py --profile --runs 2`, average | **47.62 s** (47.60 / 47.64) | 74.19 s (74.03 / 74.35) |
+| `diffusion_benchmark_serving.py`, 4 requests | **48.22 s** mean, P95 48.37 s | -- |
+
+The serving benchmark ran against `serve.sh`: 4/4 successful, 192.88 s wall, latency
+median 48.28 s, P99 48.37 s, `stage_0_gen_ms` mean 47670. The offline image and the one
+returned by `/v1/chat/completions` for the same prompt and seed are byte-identical
+(`sha256 73c6c5aa...`). Moving the decode saves 26.7 s, 36% of the request; denoise is now
+95% of it.
+
+The measurements below predate the device VAE and are kept for the comparisons they
+support. They used `moe_kernel: torch`, and the third warm generation:
 
 | Stage | Seconds |
 | --- | --- |
@@ -234,8 +269,8 @@ varies by ~2.7 s run to run (25.1-27.8 s observed). So the honest read is that N
 the dominant compute at no measured cost, not that sparsity wins here — the ~8x FLOP
 saving is spent entirely on block bookkeeping.
 
-That leaves the host-side VAE decode as the largest remaining term, at 36% of a warm
-request.
+That left the host-side VAE decode as the largest remaining term, at 36% of a warm
+request -- which is what the next section removes.
 
 ### Moving the VAE decode onto the device
 
@@ -320,9 +355,39 @@ weights after packing, building the decoder alone (`only_decoder`, the encoder i
 and decode never calls it), and freeing each finished stage's graph brings bfloat16
 residency to **5.0 GiB**, measured, with ~19 GiB spare.
 
-The `vae_decode_seconds` figure in the measured-performance table above is still the host
-path: wiring this into the pipeline's `_decode` is not done, so a warm request is still
-~72 s. On these numbers it should land near 48 s.
+**In the pipeline.** `vae_device: neuron` builds this decoder on the output rank's core
+on the first request (`vae_device.StagedDeviceDecoder`, 5.0 s from the host VAE's weights,
+which are already loaded) and runs the seven stages back to back. The check script and the
+pipeline share `vae_device.py`, so they trace the same graphs. A warm decode is **2.49 s**
+and a warm request **47.6 s**, against 29.17 s and 74.2 s on the host path in the same
+build; the ~48 s projection held. Same prompt and seed, the device image is **58.92 dB**
+PSNR against the host float32 decode: at most 3/255 off per channel, 0.083/255 on average,
+77.74% of pixels identical -- in line with the 58.71 dB the standalone check measured on a
+real image, and a tenth of the VAE's own 47.04 dB round-trip error.
+
+**Memory on the output rank's core**, from `neuron-monitor`: every core peaks at 7.73-7.76
+GiB with the host decode, so the output rank had 16.2 GiB spare on its 24 GiB core
+(96 GiB per device over 4 logical cores at LNC2). With the decoder resident it peaks at
+**19.93 GiB** -- model code 5.00, shared scratchpad 5.00, tensors 9.86 -- leaving 4.1 GiB.
+The other 31 cores are unchanged. Most of the growth is the stage NEFFs' instruction streams
+and a larger scratchpad, not the 5.0 GiB of decoder tensors the standalone check measured,
+so measure with `neuron-monitor` rather than adding up weights.
+
+**The NEFF cache is keyed on source lines, not just on the graph.** torch-mlir attaches
+each op's location -- the absolute path and line of every traced frame -- to the MLIR, and
+the cache key is a hash of that MLIR. Moving the stage functions out of the check script
+into `vae_device.py` was therefore a cold compile, even though the graph had not changed.
+Copying the same code to another directory was a cold compile as well. So a saved
+`neff-cache` is only valid for the same files at the same path; with this repo installed
+at `/workspace/plugin` (the bootstrap layout), editing a line above a traced function
+costs that function's compile. The prefill graph, whose code is in an unchanged file,
+hit the cache across the same edit that recompiled the denoise step. The key does
+**not** depend on the caller, the compile order or `NEURON_CC_FLAGS` (the stage's
+`compiler_args` replace it). A stage compiled by `compile_vae_stages.py` from a zero
+tensor hits the cache from a different script that compiled an unrelated graph first
+(0.9 s against 15 s cold). That is what makes compiling the stages in parallel valid: the
+seven took 47 min wall at 1024x1024 (1 s for the cached `in+mid`, then
+115 / 891 / 1559 / 2741 / 2263 / 116 s), against ~2 hours in series.
 
 
 ## Validation
@@ -346,6 +411,11 @@ weight loader rank by rank at TP16 and TP32 and asserts the shards tile the chec
 the order the forward assumes, including that each rank's query heads belong to the KV
 head it loaded (the replicated-KV grouping, which only matters when
 `num_key_value_heads < tp_size`).
+
+`test/unit/test_hunyuan_image3_vae_device.py` checks the staged decode on a small random
+VAE of the same architecture, on CPU: the seven stages run back to back equal
+`vae.decode` exactly (frame selection included), and the float32-statistics GroupNorm and
+attention match the stock modules to 5.3e-07 in float32.
 
 `examples/hunyuan_image3/check_nki_kernels.py` compiles each NKI kernel on its own, at
 the shapes the real model runs, and diffs it against the torch fallback. On device at
@@ -371,8 +441,16 @@ generates what the prompt asks for" — not quality parity with the reference de
   costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
-- The VAE decode runs on the host in float32 on the output rank only, so it is neither
-  accelerated nor parallel (28 s at 1024x1024).
+- The VAE decode runs on the output rank's core only, not across ranks (2.5 s at
+  1024x1024). Images over 1024 on either side decode on the host (29 s), because the NKI
+  convolution's spatial range ends there and the device decoder has released the torch
+  weights those sites would need.
+- Each resolution the device VAE decodes is seven more NEFFs: ~47 min to precompile at
+  1024x1024 with `compile_vae_stages.py`, ~2 hours if the first request compiles them.
+  The output rank's core has 4.1 GiB left with one resolution resident.
+- The NEFF cache key includes source paths and line numbers (see
+  [Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device)), so a
+  cache saved from one checkout is only reused by the same files at the same path.
 - Sparsity buys nothing here. The blockwise MoE kernel is the default and generates a
   coherent image over all 32 layers, but at best it matches the dense matmuls rather than
   beating them: block bookkeeping consumes the whole ~8x arithmetic saving (see

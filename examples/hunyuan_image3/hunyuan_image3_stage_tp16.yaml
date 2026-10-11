@@ -34,7 +34,13 @@ stage_args:
         # 256 -> 1.115, 512 -> 0.911, 1024 -> 0.911, 2048 -> 0.949. Smaller blocks pay
         # more per-block bookkeeping; larger ones pad more dead rows.
         moe_block_size: 1024
-        # The VAE decodes on the host; float32 matches the reference decoder.
+        # Where the output rank decodes. `neuron` runs the decoder on its core as seven
+        # staged bfloat16 graphs with float32 reductions: 2.5 s against 29 s on the host,
+        # 58.9 dB PSNR to the host decode. Each new resolution compiles those graphs once
+        # (~47 min at 1024x1024 with compile_vae_stages.py, ~2 h inside the first
+        # request). `cpu` is the float32 reference.
+        vae_device: neuron
+        # Dtype of the host decode (vae_device: cpu, or a shape the device cannot take).
         vae_dtype: float32
       parallel_config:
         tensor_parallel_size: 16
