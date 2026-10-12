@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vllm-omni-neuron"
-version = "0.24.0.0.1.0"
+version = "0.24.0.0.2.0"
 description = "vLLM-Omni Neuron backend plugin for diffusion model inference on AWS Trainium/Inferentia"
 license = "Apache-2.0"
 authors = [
