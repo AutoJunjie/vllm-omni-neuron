@@ -254,6 +254,9 @@ the dense path and explains why the blockwise kernel only ever reached parity.
 `shard_on_i_hybrid` with `num_static_block=0` runs nkilib's hardware dynamic loop over
 the live blocks only, which the mapping packs first. All three agree with float32 dense
 math to bf16 level (5.7e-03 for both shard_on_i forms, 9.6e-03 for shard_on_block).
+In the full model, per step on identical inputs, the hybrid path is as close to a
+float32 CPU run as the dense path (see [Per-step check against
+float32](#per-step-check-against-float32)).
 
 In the model this takes a denoise step from 0.902 s to 0.760 s and a warm request from
 47.04 s to 39.94 s; the step saving (0.142 s) is close to the per-layer one x 32 against
@@ -583,6 +586,57 @@ OpenAI chat endpoint, with byte-identical output. There is **no** image-quality 
 score (no GEBench or equivalent) and no per-step comparison against a GPU run of the same
 checkpoint, so the correctness claim is "reference math reproduced, and the full pipeline
 generates what the prompt asks for" — not quality parity with the reference deployment.
+
+### Per-step check against float32
+
+Comparing final images says little about a kernel change: 50 steps amplify any
+difference in accumulation order into different fine detail. Instead, the pipeline can
+record every denoise step and replay recorded inputs (`_StepTrace` in
+`pipeline_hunyuan_image3.py`). With `HY3_TRACE_DIR` it saves each step's input latents,
+the raw CFG-batch prediction and the combined prediction. With `HY3_TRACE_FORCE_DIR` it
+feeds a recorded trace's input latents into every step (teacher forcing), so two
+implementations are compared on identical inputs at every step. With `HY3_TRACE_STEPS`
+it runs only the listed steps. `examples/hunyuan_image3/check_denoise_reference.py` runs
+the same pipeline class on the host at TP1 in float32, with every kernel on its torch
+fallback. Each step takes ~20 min there; the model loads in ~6 min and needs ~320 GB of
+host memory. `examples/hunyuan_image3/compare_step_traces.py` diffs traces:
+
+```bash
+# reference trajectory on device, then the others forced onto its latents
+HY3_TRACE_DIR=/workspace/out/trace/hybrid python examples/hunyuan_image3/run.py ...
+HY3_TRACE_FORCE_DIR=/workspace/out/trace/hybrid HY3_TRACE_DIR=/workspace/out/trace/dense \
+  python examples/hunyuan_image3/run.py --moe-kernel torch ...
+HY3_TRACE_FORCE_DIR=/workspace/out/trace/hybrid HY3_TRACE_STEPS=0,25,49 \
+  HY3_TRACE_DIR=/workspace/out/trace/cpu_fp32 \
+  python examples/hunyuan_image3/check_denoise_reference.py --seed 42
+python examples/hunyuan_image3/compare_step_traces.py \
+  --reference cpu_fp32=/workspace/out/trace/cpu_fp32 hybrid=... block=... dense=...
+```
+
+The test case is the Mars-observatory prompt above at seed 42, 1024x1024. It compares
+the three routed-expert paths on device (bf16, TP32): `shard_on_i_hybrid` (the default),
+`shard_on_block`, and the dense torch path (`moe_kernel: torch`). Each number is the
+relative L2 error of the combined CFG prediction, which is what the scheduler consumes.
+The conditional and unconditional branches are given in brackets:
+
+| vs float32 CPU | step 0 | step 25 | step 49 | mean | cosine min |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dense (torch) | 4.08e-02 | 3.80e-02 | 8.59e-02 | 5.49e-02 (2.20e-02 / 2.98e-02) | 0.99630 |
+| `shard_on_block` | 4.06e-02 | 3.74e-02 | 8.73e-02 | 5.51e-02 (2.23e-02 / 2.91e-02) | 0.99619 |
+| **`shard_on_i_hybrid`** | 4.77e-02 | 3.82e-02 | 8.32e-02 | 5.64e-02 (2.34e-02 / 2.98e-02) | 0.99653 |
+
+| vs dense bf16, all 50 steps | mean | max | cosine min |
+| --- | ---: | ---: | ---: |
+| `shard_on_block` | 3.47e-02 (1.22e-02 / 1.23e-02) | 8.08e-02 | 0.99673 |
+| `shard_on_i_hybrid` | 3.46e-02 (1.23e-02 / 1.22e-02) | 8.10e-02 | 0.99671 |
+
+All three paths are the same distance from float32, within ±3% of one another. No path
+is consistently best: hybrid is worst at step 0 and best at step 49. Their distance from
+each other (3.5e-02) is about the same as their distance from float32, so that much error
+is simply what bf16 gives. The MoE kernel adds nothing measurable on top of it. The
+combined error is ~2x the branch errors, because the CFG combine
+`uncond + 2.5 (cond - uncond)` amplifies the difference between two close branches. It
+peaks at the last step (t ≈ 9) for every path, float32 aside.
 
 ## Known limits
 

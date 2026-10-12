@@ -127,18 +127,42 @@ def _check_tensor_parallel_size(stage_cfg_path: str) -> None:
         )
 
 
+def _write_stage_config_with(stage_cfg_path: str, overrides: dict) -> str:
+    """A temporary copy of the stage config with ``overrides`` merged into model_config."""
+    import tempfile
+
+    with open(stage_cfg_path) as handle:
+        config = yaml.safe_load(handle)
+    engine_args = config["stage_args"][0]["engine_args"]
+    engine_args["model_config"] = {**(engine_args.get("model_config") or {}), **overrides}
+    handle = tempfile.NamedTemporaryFile(
+        "w", prefix="hunyuan_image3_stage_", suffix=".yaml", delete=False
+    )
+    with handle:
+        yaml.safe_dump(config, handle, sort_keys=False)
+    return handle.name
+
+
 def main() -> None:
     stage_cfg = args.stage_config or os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "hunyuan_image3_stage.yaml"
     )
     _check_tensor_parallel_size(stage_cfg)
+    overrides = {
+        key: value
+        for key, value in (
+            ("prefill_len", args.prefill_len),
+            ("moe_kernel", args.moe_kernel),
+            ("vae_device", args.vae_device),
+        )
+        if value is not None
+    }
+    if overrides:
+        # Omni's model_config argument did not reach the engine (--moe-kernel torch still
+        # ran the NKI MoE), while the stage config always does, so overrides go into a copy.
+        stage_cfg = _write_stage_config_with(stage_cfg, overrides)
+        print(f"[init] model_config overrides {overrides} -> {stage_cfg}")
     model_config = _load_model_config(stage_cfg)
-    if args.prefill_len is not None:
-        model_config["prefill_len"] = args.prefill_len
-    if args.moe_kernel is not None:
-        model_config["moe_kernel"] = args.moe_kernel
-    if args.vae_device is not None:
-        model_config["vae_device"] = args.vae_device
 
     # A cold compile of the 80B MoE denoise graph runs far past vllm-omni's 600 s
     # worker handshake, so raise the ceiling before Omni starts the orchestrator.

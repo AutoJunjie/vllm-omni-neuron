@@ -788,8 +788,15 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 f"{input_ids.shape[0]}"
             )
 
+        trace = _StepTrace.from_env(self.is_output_rank)
         denoise_start = time.perf_counter()
         for index, timestep in enumerate(timesteps):
+            if trace is not None:
+                if trace.done(index):
+                    break
+                if trace.skip(index):
+                    continue
+                latents = trace.forced_latents(index, latents)
             self._current_timestep = timestep
             # Cast on the host and transfer separately: the Lite runtime's copy
             # requires matching dtypes, so a single .to(device=..., dtype=...) raises
@@ -808,9 +815,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             )
             # Same rule in the other direction: copy first, then widen on the host.
             pred = pred.cpu().to(torch.float32)
+            raw_pred = pred
             if cfg_factor == 2:
                 pred_cond, pred_uncond = pred.chunk(2)
                 pred = pred_uncond + guidance * (pred_cond - pred_uncond)
+            if trace is not None:
+                trace.record(index, timestep, latents, raw_pred, pred)
             latents = self.scheduler.step(pred, timestep, latents, return_dict=False)[0]
             if index == 0:
                 logger.info("HunyuanImage3: first denoise step complete (graph warm)")
@@ -969,3 +979,58 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         except OSError as error:
             logger.warning("Failed to write perf metrics: %s", error)
         logger.info("HunyuanImage3 perf metrics: %s", metrics)
+
+
+class _StepTrace:
+    """Debug-only per-step capture of the denoise loop, for comparing implementations.
+
+    Off unless ``HY3_TRACE_DIR`` or ``HY3_TRACE_FORCE_DIR`` is set. ``HY3_TRACE_DIR``: the
+    output rank saves each step's input latents, the raw CFG-batch prediction and the
+    combined one. ``HY3_TRACE_FORCE_DIR``: every step starts from the latents a previous
+    trace recorded there instead of its own -- teacher forcing, so two implementations are
+    compared on identical inputs at every step rather than on diverging trajectories.
+    ``HY3_TRACE_STEPS`` (``0,25,49``): with forcing, compute only those steps.
+    """
+
+    def __init__(self, out_dir, force_dir, steps, save):
+        self.out_dir, self.force_dir, self.steps, self.save = out_dir, force_dir, steps, save
+        if out_dir and save:
+            os.makedirs(out_dir, exist_ok=True)
+
+    @classmethod
+    def from_env(cls, is_output_rank):
+        out_dir = os.environ.get("HY3_TRACE_DIR")
+        force_dir = os.environ.get("HY3_TRACE_FORCE_DIR")
+        if not out_dir and not force_dir:
+            return None
+        raw = os.environ.get("HY3_TRACE_STEPS")
+        steps = sorted({int(x) for x in raw.split(",")}) if raw else None
+        if steps is not None and not force_dir:
+            raise ValueError("HY3_TRACE_STEPS needs HY3_TRACE_FORCE_DIR")
+        logger.warning(
+            "HunyuanImage3 step trace: out=%s force=%s steps=%s", out_dir, force_dir, steps
+        )
+        return cls(out_dir, force_dir, steps, is_output_rank)
+
+    def done(self, index):
+        return self.steps is not None and index > self.steps[-1]
+
+    def skip(self, index):
+        return self.steps is not None and index not in self.steps
+
+    def forced_latents(self, index, latents):
+        if not self.force_dir:
+            return latents
+        return torch.load(os.path.join(self.force_dir, f"step_{index:02d}.pt"))["latents_in"]
+
+    def record(self, index, timestep, latents, raw_pred, pred):
+        if self.out_dir and self.save:
+            torch.save(
+                {
+                    "timestep": timestep.clone(),
+                    "latents_in": latents.clone(),
+                    "pred_raw": raw_pred.clone(),
+                    "pred": pred.clone(),
+                },
+                os.path.join(self.out_dir, f"step_{index:02d}.pt"),
+            )
