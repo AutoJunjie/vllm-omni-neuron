@@ -37,6 +37,21 @@ stage_args:
         # Tokens per kernel block. With the dynamic loop, 512 beats 1024 (5.9 ms) and 256
         # (5.6 ms): smaller blocks pad less, until per-block overhead takes over.
         moe_block_size: 512
+        # Split the UNet patch embed and final layer by GroupNorm group across the TP ranks
+        # instead of running them whole on every rank (~245 ms of a 760 ms step).
+        unet_parallel: true
+        # Cache-DiT DBCache over the denoise loop: skip all but the first layer on steps whose
+        # first-layer residual moved less than residual_diff_threshold since the last full
+        # step (4 warmup steps, at most 3 cached in a row). 0.12 caches ~25 of 50 steps:
+        # a 29.9 s request becomes 17.2 s at 32 dB PSNR to the uncached image. Cache-DiT's
+        # own default, 0.24, caches 33 (12.9 s, 27 dB, visibly softer). false = every step.
+        step_cache:
+          residual_diff_threshold: 0.12
+        # vllm-omni's TeaCache for this model: skip whole steps whose timestep embedding
+        # barely moved, reusing the last computed prediction. Changes the output; off by
+        # default. true = vllm-omni's calibrated coefficients and rel_l1_thresh 0.2, or a
+        # mapping with rel_l1_thresh / coefficients. Alternative to step_cache, not both.
+        tea_cache: false
         # Where the output rank decodes. `neuron` runs the decoder on its core as seven
         # staged 16-bit graphs with float32 reductions, ~2.5 s against 29 s on the host.
         # Each new resolution or dtype compiles those graphs once (~45 min at 1024x1024

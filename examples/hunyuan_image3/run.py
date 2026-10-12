@@ -91,6 +91,22 @@ parser.add_argument(
     default=None,
     help="Override Neuron platform detection when the runtime cannot detect it.",
 )
+parser.add_argument(
+    "--step-cache",
+    type=float,
+    default=None,
+    metavar="THRESHOLD",
+    help="Cache-DiT DBCache residual-diff threshold for the denoise loop (0.24 is Cache-DiT's "
+    "default); 0 disables it. Default comes from the stage config (off).",
+)
+parser.add_argument(
+    "--tea-cache",
+    type=float,
+    default=None,
+    metavar="THRESHOLD",
+    help="vllm-omni TeaCache rel_l1_thresh for the denoise loop (0.2 is its default for this "
+    "model); 0 disables it. Default comes from the stage config (off).",
+)
 parser.add_argument("--profile", action="store_true", help="Run timed warm generations")
 parser.add_argument("--runs", type=int, default=1, help="Timed runs when --profile is set")
 args = parser.parse_args()
@@ -157,6 +173,14 @@ def main() -> None:
         )
         if value is not None
     }
+    if args.tea_cache is not None:
+        overrides["tea_cache"] = {"rel_l1_thresh": args.tea_cache} if args.tea_cache > 0 else False
+        if args.tea_cache > 0 and args.step_cache is None:
+            overrides["step_cache"] = False  # the two are alternatives; the stage config enables step_cache
+    if args.step_cache is not None:
+        overrides["step_cache"] = (
+            {"residual_diff_threshold": args.step_cache} if args.step_cache > 0 else False
+        )
     if overrides:
         # Omni's model_config argument did not reach the engine (--moe-kernel torch still
         # ran the NKI MoE), while the stage config always does, so overrides go into a copy.

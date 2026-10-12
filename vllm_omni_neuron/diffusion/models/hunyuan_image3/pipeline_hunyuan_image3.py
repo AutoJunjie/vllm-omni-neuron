@@ -60,6 +60,11 @@ from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer
     nki_attention_enabled,
     nki_mlp_enabled,
 )
+from vllm_omni_neuron.diffusion.models.hunyuan_image3.unet_parallel import (
+    UNetShard,
+    unet_down_tokens,
+    unet_up_image,
+)
 from vllm_omni_neuron.lite_compat import is_lite_runtime
 
 logger = logging.getLogger(__name__)
@@ -216,6 +221,25 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         use_nki_attention = nki_attention_enabled(model_config)
         moe_block_size = int(model_config.get("moe_block_size", 512))
         moe_implementation = str(model_config.get("moe_implementation", "shard_on_i_hybrid"))
+        # Split the patch embed and final layer by GroupNorm group across the TP ranks
+        # (unet_parallel.py) instead of running them whole on every rank.
+        self.unet_parallel = bool(model_config.get("unet_parallel", True))
+        self._unet_shard = None
+        # Cache-DiT DBCache over the denoise loop (_StepCache). Off by default: it trades
+        # exactness for skipping most of the backbone on steps whose first layer barely
+        # changes. True takes Cache-DiT's defaults; a mapping overrides them.
+        self._step_cache_config = _StepCache.parse(model_config.get("step_cache"))
+        self._step_cache_graphs = None
+        self._zero_residual = None
+        self._step_cache_stats = None
+        # vllm-omni's TeaCache for this model (_TeaCache): skip whole steps whose timestep
+        # embedding barely moved, reusing the last computed prediction. Off by default.
+        self._tea_cache_config = _TeaCache.parse(model_config.get("tea_cache"))
+        if self._tea_cache_config is not None and self._step_cache_config is not None:
+            raise ValueError("tea_cache and step_cache are alternatives; enable at most one")
+        self._host_time_embed = None
+        self._tea_cache_stats = None
+        self._tea_cache_plans: dict = {}
 
         if config.img_proj_type != "unet":
             raise ValueError(f"Unsupported img_proj_type: {config.img_proj_type}")
@@ -332,7 +356,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         """Move only the device-resident modules; the embedding and the VAE stay on host."""
         self.model.to(*args, **kwargs)
         for name in _REPLICATED_PREFIXES:
+            if self._unet_shard is not None and name in ("patch_embed", "final_layer"):
+                # Only this rank's slices run; the whole modules (~0.5 GiB) stay on host.
+                continue
             getattr(self, name).to(*args, **kwargs)
+        if self._unet_shard is not None:
+            self._unet_shard.to(*args, **kwargs)
         return self
 
     # ---- weights -----------------------------------------------------------
@@ -357,6 +386,21 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         model_path = self._resolve_model_path()
         self.model.load_weights(model_path)
         self._load_replicated_weights(model_path)
+        if self._tea_cache_config is not None:
+            import copy
+
+            # The cache decision runs on the host; to() moves self.time_embed to the core.
+            # Held outside the module tree so to() and the state dict never see it.
+            self.__dict__["_host_time_embed"] = copy.deepcopy(self.time_embed).eval()
+        if self.unet_parallel and self.model.tp_size > 1:
+            self._unet_shard = UNetShard(
+                self.patch_embed, self.final_layer, self.model.tp_rank, self.model.tp_size
+            )
+            self._unet_shard.group = self.model.tp_group
+            logger.info(
+                "HunyuanImage3: patch embed / final layer split across %d TP ranks",
+                self.model.tp_size,
+            )
 
     def _replicated_weight_targets(self) -> dict[str, tuple[str, torch.Tensor, bool]]:
         """``{checkpoint key -> (parameter name, tensor, required)}`` for non-sharded modules.
@@ -419,6 +463,29 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
 
     # ---- compilation -------------------------------------------------------
 
+    def _embed_step_inputs(self, latents: torch.Tensor, timestep: torch.Tensor):
+        """Patch embed: ``[timestep token] + image tokens``, plus the token grid size."""
+        t_emb = self.time_embed(timestep)
+        shard = self._unet_shard
+        if shard is not None:
+            image_tokens, token_h, token_w = unet_down_tokens(shard, latents, t_emb, shard.all_gather)
+        else:
+            image_tokens, token_h, token_w = _unet_down_tokens(self.patch_embed, latents, t_emb)
+        timestep_token = self.timestep_emb(timestep).reshape(latents.shape[0], 1, -1)
+        return torch.cat((timestep_token, image_tokens), dim=1), token_h, token_w
+
+    def _unembed_step_output(
+        self, hidden_states: torch.Tensor, timestep: torch.Tensor, token_h: int, token_w: int
+    ) -> torch.Tensor:
+        """Final layer: the image tokens back to a latent-shaped prediction."""
+        shard = self._unet_shard
+        t_emb = self.time_embed_2(timestep)
+        if shard is not None:
+            return unet_up_image(
+                shard, hidden_states[:, 1:, :], t_emb, token_h, token_w, shard.all_gather
+            )
+        return _unet_up_image(self.final_layer, hidden_states[:, 1:, :], t_emb, token_h, token_w)
+
     def _denoise_step_graph(
         self,
         latents: torch.Tensor,
@@ -430,11 +497,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         *prompt_kv: torch.Tensor,
     ) -> torch.Tensor:
         """Patch embed -> backbone denoise -> final layer, as one traced graph."""
-        t_emb = self.time_embed(timestep)
-        image_tokens, token_h, token_w = _unet_down_tokens(self.patch_embed, latents, t_emb)
-        timestep_token = self.timestep_emb(timestep).reshape(latents.shape[0], 1, -1)
-        hidden_states = torch.cat((timestep_token, image_tokens), dim=1)
-
+        hidden_states, token_h, token_w = self._embed_step_inputs(latents, timestep)
         hidden_states = self.model.forward_denoise(
             hidden_states,
             cos,
@@ -442,13 +505,75 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             (timestep_key_bias, image_key_bias),
             *prompt_kv,
         )
-        return _unet_up_image(
-            self.final_layer,
-            hidden_states[:, 1:, :],
-            self.time_embed_2(timestep),
-            token_h,
-            token_w,
+        return self._unembed_step_output(hidden_states, timestep, token_h, token_w)
+
+    # The three graphs of a step-cached denoise step (Cache-DiT's DBCache with one
+    # compute block in front and none behind; see _StepCache). The host decides between
+    # the last two from the scalar the first one returns.
+
+    def _cache_front_graph(
+        self,
+        latents: torch.Tensor,
+        timestep: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        timestep_key_bias: torch.Tensor,
+        image_key_bias: torch.Tensor,
+        prompt_key: torch.Tensor,
+        prompt_value: torch.Tensor,
+        previous_residual: torch.Tensor,
+    ):
+        """Patch embed and the first layer; Cache-DiT's diff against the last full step.
+
+        Returns the first layer's output, its residual, and
+        ``mean|R_prev - R| / mean|R_prev|`` as a one-element tensor. Every TP rank holds
+        the same (all-reduced) hidden states, so every rank computes the same diff.
+        """
+        hidden_in, _, _ = self._embed_step_inputs(latents, timestep)
+        hidden = self.model.layers[0].forward_denoise(
+            hidden_in, cos, sin, (timestep_key_bias, image_key_bias), prompt_key, prompt_value
         )
+        residual = hidden - hidden_in
+        previous = previous_residual.float()
+        diff = (previous - residual.float()).abs().mean() / previous.abs().mean()
+        return hidden, residual, diff.reshape(1)
+
+    def _cache_rest_graph(
+        self,
+        hidden: torch.Tensor,
+        timestep: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        timestep_key_bias: torch.Tensor,
+        image_key_bias: torch.Tensor,
+        token_h: int,
+        token_w: int,
+        *prompt_kv: torch.Tensor,
+    ):
+        """The remaining layers and the final layer; also their residual, for the cache."""
+        first = hidden
+        for index, layer in enumerate(self.model.layers[1:]):
+            hidden = layer.forward_denoise(
+                hidden,
+                cos,
+                sin,
+                (timestep_key_bias, image_key_bias),
+                prompt_kv[2 * index],
+                prompt_kv[2 * index + 1],
+            )
+        pred = self._unembed_step_output(hidden, timestep, token_h, token_w)
+        return pred, hidden - first
+
+    def _cache_hit_graph(
+        self,
+        hidden: torch.Tensor,
+        block_residual: torch.Tensor,
+        timestep: torch.Tensor,
+        token_h: int,
+        token_w: int,
+    ) -> torch.Tensor:
+        """A cached step: the first layer's output plus the remaining layers' last residual."""
+        return self._unembed_step_output(hidden + block_residual, timestep, token_h, token_w)
 
     def compile(self, *args, **kwargs):
         """Compile the prefill graph and the fused denoise-step graph."""
@@ -470,11 +595,79 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             options={**options, "model_name": "hunyuan_image3_denoise_step"},
             **kwargs,
         )
+        if self._step_cache_config is not None:
+            self._step_cache_graphs = tuple(
+                torch.compile(
+                    fn, *args, options={**options, "model_name": f"hunyuan_image3_{name}"}, **kwargs
+                )
+                for name, fn in (
+                    ("cache_front", self._cache_front_graph),
+                    ("cache_rest", self._cache_rest_graph),
+                    ("cache_hit", self._cache_hit_graph),
+                )
+            )
         return self
 
     def _run_denoise_step(self, *call_args):
         fn = self._compiled_denoise_step or self._denoise_step_graph
         return fn(*call_args)
+
+    def _run_cached_step(
+        self,
+        cache: "_StepCache",
+        index: int,
+        latents: torch.Tensor,
+        timestep: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        timestep_key_bias: torch.Tensor,
+        image_key_bias: torch.Tensor,
+        prompt_kv,
+    ) -> torch.Tensor:
+        """One denoise step through the step cache: front, then rest or hit."""
+        front, rest, hit = self._step_cache_graphs or (
+            self._cache_front_graph,
+            self._cache_rest_graph,
+            self._cache_hit_graph,
+        )
+        patch = int(self.hf_config.patch_size)
+        token_h, token_w = latents.shape[2] // patch, latents.shape[3] // patch
+        previous = cache.residual
+        if previous is None:
+            shape = (latents.shape[0], 1 + token_h * token_w, int(self.hf_config.hidden_size))
+            if self._zero_residual is None or tuple(self._zero_residual.shape) != shape:
+                # Only read before the first full step, which never caches.
+                self._zero_residual = torch.zeros(shape, dtype=self.model.dtype).to(self.device)
+            previous = self._zero_residual
+        hidden, residual, diff = front(
+            latents,
+            timestep,
+            cos,
+            sin,
+            timestep_key_bias,
+            image_key_bias,
+            prompt_kv[0],
+            prompt_kv[1],
+            previous,
+        )
+        diff = float(diff.cpu()[0])
+        use_cache = _all_tp_ranks(cache.wants_cache(index, diff))
+        cache.record(index, diff, use_cache)
+        if use_cache:
+            return hit(hidden, cache.block_residual, timestep, token_h, token_w)
+        pred, block_residual = rest(
+            hidden,
+            timestep,
+            cos,
+            sin,
+            timestep_key_bias,
+            image_key_bias,
+            token_h,
+            token_w,
+            *prompt_kv[2:],
+        )
+        cache.update(residual, block_residual)
+        return pred
 
     # ---- request preparation ----------------------------------------------
 
@@ -645,6 +838,11 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         first = req.prompts[0] if req.prompts else None
         if bot_task is None and isinstance(first, dict):
             bot_task = first.get("bot_task")
+        if bot_task is None:
+            # vllm-omni 0.24's diffusion chat endpoint does not forward a request's
+            # bot_task (only later releases pass model extras through extra_args), so a
+            # served stage can set one for every request in model_config.
+            bot_task = dict(self.od_config.model_config or {}).get("bot_task")
         if bot_task in AR_BOT_TASKS and not any(text is not None for text in cot_text_list):
             # Think / recaption on the same backbone first; the DiT then conditions on
             # the text, as upstream's ar2diffusion hands it over (bot_task back to auto).
@@ -789,6 +987,19 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             )
 
         trace = _StepTrace.from_env(self.is_output_rank)
+        step_cache = (
+            _StepCache(**self._step_cache_config) if self._step_cache_config is not None else None
+        )
+        tea_cache = None
+        if self._tea_cache_config is not None:
+            tea_cache = _TeaCache(**self._tea_cache_config)
+            # The plan depends only on the timesteps: compute it once per schedule.
+            key = (tuple(float(t) for t in timesteps), tea_cache.threshold)
+            if key not in self._tea_cache_plans:
+                tea_cache.plan(self._host_time_embed, timesteps)
+                self._tea_cache_plans[key] = (tea_cache.compute, tea_cache.distances)
+            tea_cache.compute, tea_cache.distances = self._tea_cache_plans[key]
+        tea_pred = None
         denoise_start = time.perf_counter()
         for index, timestep in enumerate(timesteps):
             if trace is not None:
@@ -804,17 +1015,35 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             model_input = latents.repeat(cfg_factor, 1, 1, 1).to(self.model.dtype)
             model_input = model_input.to(self.device)
             t_expand = timestep.repeat(cfg_factor).to(torch.float32).to(self.device)
-            pred = self._run_denoise_step(
-                model_input,
-                t_expand,
-                step_cos,
-                step_sin,
-                timestep_key_bias,
-                image_key_bias,
-                *prompt_kv,
-            )
+            if tea_cache is not None and not tea_cache.compute[index]:
+                # Skipped step: the last computed (CFG-batch) prediction stands in.
+                pred = tea_pred
+            elif step_cache is not None:
+                pred = self._run_cached_step(
+                    step_cache,
+                    index,
+                    model_input,
+                    t_expand,
+                    step_cos,
+                    step_sin,
+                    timestep_key_bias,
+                    image_key_bias,
+                    prompt_kv,
+                )
+            else:
+                pred = self._run_denoise_step(
+                    model_input,
+                    t_expand,
+                    step_cos,
+                    step_sin,
+                    timestep_key_bias,
+                    image_key_bias,
+                    *prompt_kv,
+                )
             # Same rule in the other direction: copy first, then widen on the host.
-            pred = pred.cpu().to(torch.float32)
+            if pred is not tea_pred:
+                pred = pred.cpu().to(torch.float32)
+                tea_pred = pred
             raw_pred = pred
             if cfg_factor == 2:
                 pred_cond, pred_uncond = pred.chunk(2)
@@ -826,6 +1055,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 logger.info("HunyuanImage3: first denoise step complete (graph warm)")
         denoise_seconds = time.perf_counter() - denoise_start
         self._current_timestep = None
+        self._step_cache_stats = step_cache.stats() if step_cache is not None else None
+        self._tea_cache_stats = tea_cache.stats() if tea_cache is not None else None
+        if tea_cache is not None and self.is_output_rank:
+            logger.info("HunyuanImage3 TeaCache: %s", self._tea_cache_stats)
+        if step_cache is not None and self.is_output_rank:
+            logger.info("HunyuanImage3 step cache: %s", self._step_cache_stats)
 
         decode_start = time.perf_counter()
         # Only the rank whose output the engine keeps needs pixels. Decoding on all 32
@@ -968,6 +1203,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 ar_seconds_per_token=ar["seconds_per_token"],
                 ar_stopped=ar["stopped"],
             )
+        if self._step_cache_stats is not None:
+            metrics["step_cache"] = self._step_cache_stats
+        if self._tea_cache_stats is not None:
+            metrics["tea_cache"] = self._tea_cache_stats
         self._last_perf_metrics = metrics
         if not self.is_output_rank:
             return
@@ -1034,3 +1273,196 @@ class _StepTrace:
                 },
                 os.path.join(self.out_dir, f"step_{index:02d}.pt"),
             )
+
+
+def _all_tp_ranks(flag: bool) -> bool:
+    """True only if every TP rank says so (host-side, over the gloo group).
+
+    The step cache picks a different graph per step, and graphs with collectives must
+    run on every rank together. The ranks compute bit-identical diffs, so this is a
+    guard against a disagreement turning into a hang, not a vote that changes anything.
+    """
+    if not torch.distributed.is_initialized():
+        return flag
+    from vllm.distributed.parallel_state import get_tp_group
+
+    group = get_tp_group()
+    if group.world_size == 1:
+        return flag
+    value = torch.tensor([1 if flag else 0], dtype=torch.int32)
+    torch.distributed.all_reduce(value, op=torch.distributed.ReduceOp.MIN, group=group.cpu_group)
+    return bool(value.item())
+
+
+class _StepCache:
+    """Cache-DiT's DBCache (``Fn_compute_blocks=1``, ``Bn_compute_blocks=0``) on the host loop.
+
+    Every step runs the patch embed and the first layer. If the first layer's residual
+    ``R = H_1 - H_0`` is within ``residual_diff_threshold`` of the last fully computed
+    step's (``mean|R_prev - R| / mean|R_prev|``), the other layers are skipped and their
+    residual from that step is added back instead; otherwise they run and both residuals
+    are kept. Never in the first ``max_warmup_steps``, never more than
+    ``max_continuous_cached_steps`` in a row, at most ``max_cached_steps`` (-1: no limit)
+    per request -- the same rules, names and defaults as vllm-omni's Cache-DiT config for
+    this model on GPU (``vllm_omni.diffusion.cache.cachedit.config.CacheDiTConfig``).
+    """
+
+    DEFAULTS = {
+        "residual_diff_threshold": 0.24,
+        "max_warmup_steps": 4,
+        "max_continuous_cached_steps": 3,
+        "max_cached_steps": -1,
+    }
+
+    @classmethod
+    def parse(cls, value):
+        """``model_config.step_cache`` -> keyword arguments, or None when disabled."""
+        if not value:
+            return None
+        if value is True:
+            return dict(cls.DEFAULTS)
+        if not isinstance(value, dict):
+            raise ValueError(f"step_cache must be a bool or a mapping, got {value!r}")
+        unknown = set(value) - set(cls.DEFAULTS) - {"enabled"}
+        if unknown:
+            raise ValueError(f"unknown step_cache keys {sorted(unknown)}; valid: {sorted(cls.DEFAULTS)}")
+        if not value.get("enabled", True):
+            return None
+        return {key: type(default)(value.get(key, default)) for key, default in cls.DEFAULTS.items()}
+
+    def __init__(
+        self,
+        residual_diff_threshold: float,
+        max_warmup_steps: int,
+        max_continuous_cached_steps: int,
+        max_cached_steps: int,
+    ) -> None:
+        self.threshold = residual_diff_threshold
+        self.warmup = max_warmup_steps
+        self.max_continuous = max_continuous_cached_steps
+        self.max_cached = max_cached_steps
+        self.residual = None  # first layer's residual at the last full step
+        self.block_residual = None  # the other layers' residual at that step
+        self.continuous = 0
+        self.cached_steps: list[int] = []
+        self.diffs: list[float] = []
+
+    def wants_cache(self, index: int, diff: float) -> bool:
+        if index < self.warmup or self.block_residual is None:
+            return False
+        if 0 <= self.max_cached <= len(self.cached_steps):
+            return False
+        if 0 <= self.max_continuous <= self.continuous:
+            return False
+        return diff < self.threshold  # False for NaN
+
+    def record(self, index: int, diff: float, cached: bool) -> None:
+        self.diffs.append(diff)
+        if not cached:
+            self.continuous = 0
+            return
+        consecutive = bool(self.cached_steps) and self.cached_steps[-1] == index - 1
+        self.continuous = self.continuous + 1 if consecutive else 1
+        self.cached_steps.append(index)
+
+    def update(self, residual: torch.Tensor, block_residual: torch.Tensor) -> None:
+        self.residual, self.block_residual = residual, block_residual
+
+    def stats(self) -> dict:
+        return {
+            "cached": len(self.cached_steps),
+            "steps": len(self.diffs),
+            "cached_steps": list(self.cached_steps),
+            "threshold": self.threshold,
+            "diffs": [round(d, 4) for d in self.diffs],
+        }
+
+
+class _TeaCache:
+    """vllm-omni's TeaCache for HunyuanImage3, on the host-driven denoise loop.
+
+    The same decision as the upstream GPU pipeline's denoise loop
+    (``HunyuanImage3Pipeline`` in ``vllm_omni/diffusion/models/hunyuan_image3/
+    hunyuan_image3_transformer.py``): the relative L1 change of ``time_embed(t)`` from
+    the previous step, rescaled by the model's calibrated polynomial, accumulates until
+    it reaches ``rel_l1_thresh``; steps below it reuse the last computed prediction and
+    run nothing on the device, and the step that crosses it computes and resets the sum.
+    Coefficients and the default threshold come from vllm-omni's ``TeaCacheConfig`` for
+    ``HunyuanImage3Pipeline``, so they track upstream.
+
+    The decision depends only on the timesteps, never on the latents, so it is planned
+    for the whole request before the first step.
+    """
+
+    @classmethod
+    def parse(cls, value):
+        """``model_config.tea_cache`` -> keyword arguments, or None when disabled."""
+        if not value:
+            return None
+        if value is True:
+            value = {}
+        if not isinstance(value, dict):
+            raise ValueError(f"tea_cache must be a bool or a mapping, got {value!r}")
+        unknown = set(value) - {"enabled", "rel_l1_thresh", "coefficients"}
+        if unknown:
+            raise ValueError(f"unknown tea_cache keys {sorted(unknown)}")
+        if not value.get("enabled", True):
+            return None
+        from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
+
+        # Only pass what was set: older vllm-omni releases reject None for either.
+        overrides = {k: value[k] for k in ("rel_l1_thresh", "coefficients") if value.get(k) is not None}
+        config = TeaCacheConfig(transformer_type="HunyuanImage3Pipeline", **overrides)
+        return {"rel_l1_thresh": float(config.rel_l1_thresh), "coefficients": list(config.coefficients)}
+
+    def __init__(self, rel_l1_thresh: float, coefficients: list[float]) -> None:
+        self.threshold = rel_l1_thresh
+        self.coefficients = coefficients
+        self.compute: list[bool] = []
+        self.distances: list[float] = []
+
+    def plan(self, time_embed: nn.Module, timesteps: torch.Tensor) -> list[bool]:
+        """Decide every step up front; identical on all TP ranks by construction."""
+        import numpy as np
+
+        rescale = np.poly1d(self.coefficients)
+        accumulated, previous = 0.0, None
+        compute, distances = [], []
+        with torch.no_grad():
+            for index, timestep in enumerate(timesteps):
+                current = time_embed(timestep.unsqueeze(0))
+                should_compute = True
+                if index > 0 and previous is not None:
+                    distance = (
+                        (current - previous).abs().mean() / (previous.abs().mean() + 1e-8)
+                    ).item()
+                    accumulated += abs(float(rescale(distance)))
+                    distances.append(round(distance, 4))
+                    if accumulated < self.threshold:
+                        should_compute = False
+                    else:
+                        accumulated = 0.0
+                previous = current
+                compute.append(should_compute)
+        # Every rank must run the same graphs: compute a step if any rank would.
+        flags = torch.tensor([int(c) for c in compute], dtype=torch.int32)
+        if torch.distributed.is_initialized():
+            from vllm.distributed.parallel_state import get_tp_group
+
+            group = get_tp_group()
+            if group.world_size > 1:
+                torch.distributed.all_reduce(
+                    flags, op=torch.distributed.ReduceOp.MAX, group=group.cpu_group
+                )
+        self.compute = [bool(f) for f in flags.tolist()]
+        self.distances = distances
+        return self.compute
+
+    def stats(self) -> dict:
+        skipped = [i for i, c in enumerate(self.compute) if not c]
+        return {
+            "computed": len(self.compute) - len(skipped),
+            "steps": len(self.compute),
+            "skipped_steps": skipped,
+            "rel_l1_thresh": self.threshold,
+        }
