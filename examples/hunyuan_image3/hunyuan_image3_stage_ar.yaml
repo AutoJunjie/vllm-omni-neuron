@@ -35,10 +35,13 @@ stage_args:
         # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
         # router selected; `torch` evaluates every local expert densely.
         moe_kernel: nki
-        # Tokens per kernel block. Measured at 1024x1024 / 50 steps, s/step of denoise:
-        # 256 -> 1.115, 512 -> 0.911, 1024 -> 0.911, 2048 -> 0.949. Smaller blocks pay
-        # more per-block bookkeeping; larger ones pad more dead rows.
-        moe_block_size: 1024
+        # The moe_cte loop. shard_on_i_hybrid runs a dynamic loop over only the blocks the
+        # router filled: 5.2 ms per layer on one rank at block 512, against 10.5 ms dense
+        # and 18.3 ms for shard_on_block, which walks every block whether live or not.
+        moe_implementation: shard_on_i_hybrid
+        # Tokens per kernel block. With the dynamic loop, 512 beats 1024 (5.9 ms) and 256
+        # (5.6 ms): smaller blocks pad less, until per-block overhead takes over.
+        moe_block_size: 512
         # Where the output rank decodes. `neuron` runs the decoder on its core as seven
         # staged 16-bit graphs with float32 reductions, ~2.5 s against 29 s on the host.
         # Each new resolution or dtype compiles those graphs once (~45 min at 1024x1024

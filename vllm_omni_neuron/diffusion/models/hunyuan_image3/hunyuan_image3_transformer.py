@@ -725,7 +725,8 @@ class NeuronHunyuanMoE(nn.Module):
         tp_group,
         use_kernel: bool,
         moe_group=None,
-        block_size: int = 1024,
+        block_size: int = 512,
+        implementation: str = "shard_on_i_hybrid",
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -777,11 +778,19 @@ class NeuronHunyuanMoE(nn.Module):
         # Tokens per kernel block. The kernel addresses tokens in 128-row tiles and
         # reads past the last live token for padding slots, so the token buffers are
         # padded up to a multiple of this. The mapping is sized for every
-        # (token, local expert) pair, so block_size sets the block count the kernel walks
-        # (T * E_local / block_size) and trades that against per-block padding. Measured
-        # at 1024x1024 / 50 steps: 1.114 s/step at 256, 0.911 at 512, 0.910 at 1024 — so
-        # per-block overhead dominates below 512 and flattens above it.
+        # (token, local expert) pair -- T * E_local / block_size blocks, plus one per
+        # expert -- and only the first of them hold tokens.
         self.block_size = int(block_size)
+        # Which moe_cte loop walks those blocks, and that is what decides the cost.
+        # Measured on one core at one rank's denoise shapes (8194 tokens, 2 of 64
+        # experts, 12.5% of the pairs live), per layer: shard_on_block 18.3 ms and
+        # shard_on_i 15.8 ms walk every block, live or not, which is slower than
+        # evaluating both experts densely (10.5 ms); shard_on_i_hybrid with no static
+        # blocks runs a hardware dynamic loop over the live blocks only -- 5.9 ms at
+        # block 1024, 5.2 ms at 512, 5.6 ms at 256.
+        if implementation not in ("shard_on_block", "shard_on_i", "shard_on_i_hybrid"):
+            raise ValueError(f"unsupported moe_cte implementation {implementation!r}")
+        self.implementation = implementation
 
         num_shared = getattr(config, "num_shared_expert", 0)
         if isinstance(num_shared, list):
@@ -866,8 +875,13 @@ class NeuronHunyuanMoE(nn.Module):
             tp_degree=1,
             padding_mask=padding_mask,
         )
+        extra = {}
+        if self.implementation == "shard_on_i_hybrid":
+            # Every block through the dynamic loop: the live ones are packed first and
+            # the loop stops at the first padded one, so no static count is needed.
+            extra["num_static_block"] = 0
         output = NF.moe_cte(
-            implementation=MoECTEImplementation.shard_on_block,
+            implementation=getattr(MoECTEImplementation, self.implementation),
             conditions=conditions,
             hidden_states=tokens,
             expert_affinities_masked=affinities_masked,
@@ -880,6 +894,7 @@ class NeuronHunyuanMoE(nn.Module):
             expert_affinities_scaling_mode=ExpertAffinityScaleMode.POST_SCALE,
             skip_token=True,
             is_tensor_update_accumulating=True,
+            **extra,
         )
         if isinstance(output, tuple):
             output = output[0]
@@ -935,7 +950,8 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         use_kernel: bool,
         moe_group=None,
         use_attention_kernel: bool = True,
-        block_size: int = 1024,
+        block_size: int = 512,
+        moe_implementation: str = "shard_on_i_hybrid",
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -946,7 +962,15 @@ class NeuronHunyuanDecoderLayer(nn.Module):
             config, tp_size, tp_group, use_attention_kernel
         )
         self.mlp = NeuronHunyuanMoE(
-            config, layer_idx, tp_size, tp_rank, tp_group, use_kernel, moe_group, block_size
+            config,
+            layer_idx,
+            tp_size,
+            tp_rank,
+            tp_group,
+            use_kernel,
+            moe_group,
+            block_size,
+            moe_implementation,
         )
 
     def forward_prefill(self, hidden_states, cos, sin):
@@ -985,7 +1009,8 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         config,
         use_nki_mlp: bool = True,
         use_nki_attention: bool = True,
-        moe_block_size: int = 1024,
+        moe_block_size: int = 512,
+        moe_implementation: str = "shard_on_i_hybrid",
     ):
         super().__init__()
         self.config = config
@@ -1039,6 +1064,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 self.moe_group,
                 use_nki_attention,
                 moe_block_size,
+                moe_implementation,
             )
             for layer_idx in range(self.num_layers)
         )
@@ -1253,10 +1279,10 @@ def nki_mlp_enabled(model_config: dict | None) -> bool:
     """Resolve the ``moe_kernel`` stage-config knob.
 
     Defaults to ``nki``: the routed experts go through the blockwise CTE MoE kernel
-    (``NF.moe_cte``), which computes only the (token, expert) pairs the router selected.
-    At the default ``moe_block_size`` of 1024 that sits at parity with dense matmuls
-    (0.911 vs 0.895 s/step of denoise, within end-to-end run-to-run noise), so NKI covers
-    this model's dominant compute at no measured cost.
+    (``NF.moe_cte``) in its ``shard_on_i_hybrid`` form, whose dynamic loop runs only the
+    blocks the router filled -- 5.2 ms per layer at one rank's denoise shapes against
+    10.5 ms for dense matmuls. (``shard_on_block``, the earlier default, walks every
+    block and was slower than dense in isolation, 18.3 ms.)
 
     ``torch`` evaluates every local expert for every token. It is the simpler path and
     the one the CPU numerics test exercises, so it is what to switch to when bisecting an

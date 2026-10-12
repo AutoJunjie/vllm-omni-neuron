@@ -98,7 +98,8 @@ spatial range, and for a request whose device decode fails.
 Each kernel is gated on `can_run_kernel` and its own tiling limits, so CPU mode and
 fake-tensor tracing take the torch path.
 
-The MoE kernel is on by default (`model_config.moe_kernel: nki`, `moe_block_size: 1024`);
+The MoE kernel is on by default (`model_config.moe_kernel: nki`, `moe_implementation:
+shard_on_i_hybrid`, `moe_block_size: 512`; see [Which moe_cte loop](#which-moe_cte-loop));
 `torch` switches the routed experts back to dense matmuls, which is the simpler path for
 bisecting. Two kernels were evaluated for the MoE and only one can even express this
 model's step:
@@ -187,15 +188,19 @@ One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG bat
 `pipeline_perf_metrics.json` on warm generations. The default is the first column; the
 other two are the same build with the VAE elsewhere:
 
-| Stage | float16 VAE, own core (default) | bfloat16 VAE, output rank's core | host VAE (`cpu`) |
-| --- | ---: | ---: | ---: |
-| Prompt prefill | 0.04 s | 0.04 s | 0.03 s |
-| Denoise (50 steps) | 45.08 s (0.902 / step) | 45.01 s (0.900 / step) | 45.08 s (0.902 / step) |
-| VAE decode | **1.84 s** | 2.49 s | 29.17 s (float32) |
-| End to end (`e2e_forward_seconds`) | **47.03 s** | 47.59 s | 74.34 s |
-| `run.py --profile`, average | **47.04 s** (3 runs, 46.98-47.09) | 47.62 s (2 runs) | 74.19 s (2 runs) |
-| `diffusion_benchmark_serving.py`, 4 requests | **47.55 s** mean, P95 47.75 s | 48.22 s mean, P95 48.37 s | -- |
-| PSNR to the host decode, same prompt and seed | **66.41 dB** | 58.92 dB | reference |
+The default (2026-10-12) is the first column: the `shard_on_i_hybrid` MoE loop (see
+[Which moe_cte loop](#which-moe_cte-loop)) and the float16 VAE on its own core. The other
+columns are the earlier `shard_on_block` MoE, with the VAE in each placement:
+
+| Stage | **default** | `shard_on_block`, float16 VAE own core | `shard_on_block`, bfloat16 VAE shared core | `shard_on_block`, host VAE |
+| --- | ---: | ---: | ---: | ---: |
+| Prompt prefill | 0.02 s | 0.04 s | 0.04 s | 0.03 s |
+| Denoise (50 steps) | **37.98 s (0.760 / step)** | 45.08 s (0.902 / step) | 45.01 s (0.900 / step) | 45.08 s (0.902 / step) |
+| VAE decode | 1.83 s | 1.84 s | 2.49 s | 29.17 s (float32) |
+| End to end (`e2e_forward_seconds`) | **39.89 s** | 47.03 s | 47.59 s | 74.34 s |
+| `run.py --profile`, average | **39.94 s** (3 runs, 39.90-39.97) | 47.04 s (3 runs) | 47.62 s (2 runs) | 74.19 s (2 runs) |
+| `diffusion_benchmark_serving.py`, 4 requests | not re-run | 47.55 s mean, P95 47.75 s | 48.22 s mean | -- |
+| PSNR of the VAE decode to the host's, same latents | 66 dB | 66.41 dB | 58.92 dB | reference |
 
 The float16 serving run: 4/4 successful, 190.20 s wall, median 47.54 s, P99 47.76 s,
 `stage_0_gen_ms` mean 47020. The offline image and the one returned by
@@ -222,6 +227,42 @@ Two independent benchmarks agree:
   served endpoint: 4/4 successful, 282.55 s wall, latency mean **70.64 s**, median
   70.68 s, P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105. The ~2 s gap is the
   offline runner's per-request Python setup, which the server amortizes.
+
+### Which moe_cte loop
+
+`examples/hunyuan_image3/bench_denoise_layer.py` times each piece of one decoder layer on
+one core, at one rank's denoise shapes (CFG batch 2 x 4097 tokens, 1 query head, 2 of the
+64 experts, routed top-8 of 64 so 12.5% of the pairs are live), each as its own graph:
+
+| Piece | ms / layer | x 32 layers |
+| --- | ---: | ---: |
+| attention (QKV, RoPE, QK norm, two-bias attention, NKI o-proj) | 3.20 | 0.102 s |
+| router | 0.36 | 0.012 s |
+| shared expert slice | 0.64 | 0.021 s |
+| norms + residuals | 1.74 | 0.056 s |
+| routed experts, dense (both experts, every token) | 10.54 | 0.337 s |
+| routed experts, `moe_cte` `shard_on_block`, block 1024 (former default) | 18.34 | 0.587 s |
+| -- of which `build_blockwise_mapping` | 0.14 | |
+| -- of which the kernel | 14.37 | |
+| routed experts, `shard_on_i`, block 1024 | 15.81 | 0.506 s |
+| routed experts, **`shard_on_i_hybrid`**, block 1024 / **512** / 256 | 5.92 / **5.19** / 5.60 | **0.166 s** |
+
+The mapping builder was never the cost; the kernel loop was. The mapping is sized for the
+worst case -- every token to every local expert, 19 blocks of 1024 here -- and
+`shard_on_block` and `shard_on_i` walk all of them, live or not, which is more rows than
+the dense path and explains why the blockwise kernel only ever reached parity.
+`shard_on_i_hybrid` with `num_static_block=0` runs nkilib's hardware dynamic loop over
+the live blocks only, which the mapping packs first. All three agree with float32 dense
+math to bf16 level (5.7e-03 for both shard_on_i forms, 9.6e-03 for shard_on_block).
+
+In the model this takes a denoise step from 0.902 s to 0.760 s and a warm request from
+47.04 s to 39.94 s; the step saving (0.142 s) is close to the per-layer one x 32 against
+dense (0.171 s). Same prompt and seed, the image is 35.0 dB PSNR to the `shard_on_block`
+one: a different accumulation order is amplified over 50 steps into different fine detail,
+not degraded detail. The cold compile of the denoise graph grows to ~43 min.
+
+The pieces sum to 0.35 s of compute per step, so ~0.4 s of the 0.76 s is the two
+all-reduces per layer of a 67 MB activation across 32 ranks, and is now the largest term.
 
 ### Against the NxDI port of the same model
 

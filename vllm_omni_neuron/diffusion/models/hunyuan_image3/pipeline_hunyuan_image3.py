@@ -214,7 +214,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             raise ValueError(f"vae_device must be 'cpu' or 'neuron', got {self.vae_device!r}")
         use_nki_mlp = nki_mlp_enabled(model_config)
         use_nki_attention = nki_attention_enabled(model_config)
-        moe_block_size = int(model_config.get("moe_block_size", 1024))
+        moe_block_size = int(model_config.get("moe_block_size", 512))
+        moe_implementation = str(model_config.get("moe_implementation", "shard_on_i_hybrid"))
 
         if config.img_proj_type != "unet":
             raise ValueError(f"Unsupported img_proj_type: {config.img_proj_type}")
@@ -237,6 +238,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             use_nki_mlp=use_nki_mlp,
             use_nki_attention=use_nki_attention,
             moe_block_size=moe_block_size,
+            moe_implementation=moe_implementation,
         )
 
         hidden_size = int(config.hidden_size)
