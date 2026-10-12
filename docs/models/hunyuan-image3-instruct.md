@@ -7,7 +7,7 @@ configurations, the two-graph execution model, NKI kernels, and known limits. --
 HunyuanImage3ForCausalMM, text-to-image, DiT, MoE, expert parallelism, NKI,
 torch.compile, libtorch-neuronx-lite -->
 <!-- meta: content_type: reference -->
-<!-- meta: date_updated: 2026-10-11 -->
+<!-- meta: date_updated: 2026-10-12 -->
 
 ## Overview
 
@@ -44,7 +44,8 @@ upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
 | --- | --- |
 | Instance | one `trn2.48xlarge` |
 | Stage config | [`examples/hunyuan_image3/hunyuan_image3_stage.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml) (TP32), [`..._tp16.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_tp16.yaml) (TP16) |
-| Parallelism | tensor/expert parallel only — no CP, no CFG parallelism, no VAE patch parallelism |
+| Parallelism | tensor/expert parallel only — no CP, no CFG parallelism, no VAE patch parallelism. The UNet patch embed and final layer are split across the TP ranks by GroupNorm group (`unet_parallel`, default on) |
+| Step caching | Cache-DiT DBCache over the denoise loop, `residual_diff_threshold` 0.12 by default (`step_cache`); vllm-omni's TeaCache for this model as an alternative (`tea_cache`, off). See [Step caching](#step-caching) |
 | Resolution | 1024x1024 (the compiled denoise graph is shape-specialised) |
 | Batch | one request at a time (`max_batch_size: 1`) |
 | Quantization | BF16 only |
@@ -155,7 +156,19 @@ curl -s http://localhost:8091/v1/chat/completions \
   | cut -d',' -f2- | base64 -d > hunyuan_image3_output.png
 ```
 
-`run.py --vae-device cpu` overrides the stage config's VAE placement for one run.
+`run.py --vae-device cpu` overrides the stage config's VAE placement for one run;
+`--step-cache THRESHOLD` and `--tea-cache THRESHOLD` (0 disables either) override the
+step caching the same way.
+
+For think / recaption over HTTP, serve `hunyuan_image3_stage_ar.yaml`: its
+`model_config.bot_task: think` applies to every request, because the diffusion chat
+endpoint of vllm-omni 0.24 does not forward a request's `bot_task` (later releases pass it
+through `extra_args`, which takes precedence):
+
+```bash
+bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091 \
+  examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml
+```
 
 A cold NEFF cache means the first request at a resolution compiles the VAE's seven stage
 graphs in series inside that request, ~2 hours at 1024x1024. Compile them in parallel
@@ -183,7 +196,20 @@ Per-request stage timings are written to
 
 ## Measured performance
 
-One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG batch of 2
+**Current defaults** (2026-10-12): one `trn2.48xlarge`, TP32, 1024x1024, 50 steps, CFG 2.5,
+seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm requests:
+
+| Request | Steps run / 50 | Denoise | VAE | Request, `run.py --profile` | Request, `/v1/chat/completions` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 27.89 s (0.558 / step) | 1.88 s | 29.89 s | -- |
+| **DiT only, default** | 25 | **15.17 s** | 1.85 s | **17.15 s** | 17.79-17.89 s |
+| **`bot_task: think` (`hunyuan_image3_stage_ar.yaml`), default** | 25 | **17.47 s** | 1.86 s | -- | **28.57-28.60 s** (AR 8.4 s, 537 tokens) |
+
+The served and offline images for the same prompt and seed are byte-identical. The
+cached image is 32.1 dB PSNR to the uncached one for the DiT-only prompt and 33.8 dB for
+the think one; see [Step caching](#step-caching) for the trade-off.
+
+The tables below are the history of the earlier defaults. One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG batch of 2
 (`guidance_scale` 2.5), `moe_kernel: nki`. Measured 2026-10-11, from
 `pipeline_perf_metrics.json` on warm generations. The default is the first column; the
 other two are the same build with the VAE elsewhere:
@@ -264,8 +290,73 @@ dense (0.171 s). Same prompt and seed, the image is 35.0 dB PSNR to the `shard_o
 one: a different accumulation order is amplified over 50 steps into different fine detail,
 not degraded detail. The cold compile of the denoise graph grows to ~43 min.
 
-The pieces sum to 0.35 s of compute per step, so ~0.4 s of the 0.76 s is the two
-all-reduces per layer of a 67 MB activation across 32 ranks, and is now the largest term.
+The pieces sum to 0.35 s of compute per step. The rest of the 0.76 s was first put
+down to the two all-reduces per layer; measuring them and profiling a step showed it was
+the patch embed and final layer instead (next section).
+
+### Where a step goes, and the UNet split
+
+`examples/hunyuan_image3/bench_allreduce.py` times the TP32 all-reduce inside a compiled
+graph, under serve.sh's runtime settings: 67 MB takes 1.07 ms (bus bandwidth 122 GB/s)
+and 33.5 MB 0.86 ms, so the 64 per step are ~68 ms. Two independent branches in one
+graph -- all-reduces and matmuls -- do not overlap: together they take 4-8 ms longer than
+apart, with or without `--enable-ccop-compute-overlap`, so interleaving the CFG branches
+to hide communication would only add the cost of halving each all-reduce.
+
+A device profile of a warm step (vllm-neuron's `NeuronProfiler`, ranks 0/1/16/31) put the
+760 ms at:
+
+| Part | Before | With `unet_parallel` |
+| --- | ---: | ---: |
+| Patch embed (`UNetDown`) and layer 0's attention, to the first all-reduce | 66 ms | 9.2 ms |
+| 32 decoder layers (collectives 109 ms, of which ~41 ms waiting on peers) | 516 ms | 544 ms |
+| Final layer (`UNetUp`) | 179 ms | 4.4 ms |
+| Step | 760 ms | 557 ms |
+
+The patch embed and final layer are ResBlocks over the 64x64 latent grid with up to 4096
+channels, ~4 TFLOP per CFG step, and every rank ran them whole; the final layer also
+spent ~167 ms in small DMAs turning the 67 MB token tensor back into an image layout.
+`unet_parallel.py` splits them by GroupNorm group -- all 32 groups, one per rank at
+TP32, so the statistics stay local -- with column-parallel convolutions over an
+all-gathered input, the timestep projection producing only the rank's scale/shift, and
+transposes only of the rank's own channels. A step goes from 0.7585 s to 0.5578 s and a
+warm request from 39.94 s to 29.89 s. On identical inputs, step by step, it is 5.25e-02
+from float32 against 5.64e-02 for the replicated path, and the images are 35.2 dB apart
+-- the usual drift of a reordered accumulation over 50 steps. A fused GroupNorm + SiLU
+kernel, as vllm-omni has for CUDA, would save less than 0.5 ms a step after the split.
+
+### Step caching
+
+`step_cache` is Cache-DiT's DBCache (`Fn_compute_blocks` 1, `Bn_compute_blocks` 0) on the
+host loop, with vllm-omni's `CacheDiTConfig` names and rules: every step runs the patch
+embed and layer 0; if layer 0's residual moved less than `residual_diff_threshold` since
+the last full step (`mean|R_prev - R| / mean|R_prev|`), the other layers are skipped and
+their last residual added back -- never in the first 4 steps, never more than 3 in a row.
+The step is three graphs (front, rest, hit) and the host picks one per step; the ranks
+compute identical diffs and agree over gloo before every step. A computed step costs
+0.565 s, a cached one 42 ms.
+
+`tea_cache` is the TeaCache vllm-omni ships for this model (in its HunyuanImage3
+pipeline's denoise loop): the rescaled relative change of `time_embed(t)` accumulates
+until `rel_l1_thresh`, and steps below it reuse the last prediction without touching the
+device. Coefficients and the 0.2 default come from vllm-omni's `TeaCacheConfig`. The
+decision depends only on the timesteps, so it is planned once per schedule.
+
+Mars prompt, seed 42, CFG 2.5; PSNR to the uncached image:
+
+| Setting | Steps run / 50 | Denoise | Request | PSNR |
+| --- | ---: | ---: | ---: | ---: |
+| off | 50 | 27.89 s | 29.89 s | -- |
+| `step_cache` 0.08 | 33 | 19.36 s | 21.35 s | 34.05 dB |
+| **`step_cache` 0.12 (default)** | 25 | **15.17 s** | **17.15 s** | **32.14 dB** |
+| `step_cache` 0.24 (Cache-DiT's default) | 17 | 10.95 s | 12.93 s | 27.28 dB |
+| `tea_cache` 0.1 | 17 | 9.58 s | 11.54 s | 25.87 dB |
+| `tea_cache` 0.2 (vllm-omni's default) | 10 | 5.68 s | 7.67 s | 18.93 dB |
+
+At 0.08 and 0.12 the image is visibly the same; at Cache-DiT's 0.24 it keeps its
+composition but loses fine structure. TeaCache reuses whole predictions from the
+timestep alone, so at the same speed it moves the image further: at 0.2 the dome's shape,
+the base and the light change. Its coefficients are calibrated on GPU, not on trn2.
 
 ### Against the NxDI port of the same model
 
@@ -523,6 +614,11 @@ python examples/hunyuan_image3/run.py --bot-task think \
 (the AR prompt is 1257 tokens, and the DiT prompt then carries the generated text too) and
 `ar_max_new_tokens: 1024`.
 
+With the current defaults (UNet split, Cache-DiT 0.12) the same request is **28.6 s** over
+`/v1/chat/completions` (AR 8.4 s, denoise 17.5 s, VAE 1.9 s); see
+[Measured performance](#measured-performance). The 2026-10-11 measurement below predates
+both and the `shard_on_i_hybrid` MoE loop.
+
 Measured 2026-10-11, 1024x1024, 50 steps, CFG 2.5, seed 42, the prompt "A cozy wooden
 cabin in a snowy pine forest at dusk, warm yellow light glowing from the windows, smoke
 rising from the chimney", `bot_task: think`, warm (`run.py --profile --runs 2`):
@@ -647,6 +743,12 @@ peaks at the last step (t ≈ 9) for every path, float32 aside.
   bucket (and pay one recompile).
 - No CFG parallelism yet: both CFG branches run in the same batch, so a guided request
   costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
+- Step caching is on by default and changes the image (32 dB PSNR to the uncached one at
+  0.12). Set `step_cache: false` for every step to run.
+- Over HTTP a request cannot choose `bot_task` with vllm-omni 0.24; the stage config's
+  `model_config.bot_task` applies to all requests.
+- The TP16 stage config carries the same defaults (`unet_parallel`, `step_cache`) but was
+  not re-measured with them on device.
 - No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
   FP8.
 - The AR is greedy only, for an explicit image size (no `auto` aspect-ratio prediction),
@@ -665,12 +767,11 @@ peaks at the last step (t ≈ 9) for every path, float32 aside.
 - The NEFF cache key includes source paths and line numbers (see
   [Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device)), so a
   cache saved from one checkout is only reused by the same files at the same path.
-- Sparsity buys nothing here. The blockwise MoE kernel is the default and generates a
-  coherent image over all 32 layers, but at best it matches the dense matmuls rather than
-  beating them: block bookkeeping consumes the whole ~8x arithmetic saving (see
-  [Measured performance](#measured-performance)). Making that bookkeeping cheaper — or
-  a kernel that fuses the routing metadata into the expert matmul — is where a real win
-  would come from.
+- The routed experts take 5.2 ms of a layer's ~16 ms with `shard_on_i_hybrid`, half the
+  dense path; the rest of a layer is attention, norms, the shared expert and the two
+  all-reduces (see [Which moe_cte loop](#which-moe_cte-loop)). The step's matmul
+  utilization is low (6% in the profile) and the tensor engine runs power-throttled about
+  half the time, which is where further per-step gains are.
 - An earlier report that the dense MLP kernel "wedged a NeuronCore" was wrong. It raises
   a clean compile-time validation error; the node losses that coincided with it have a
   separate explanation (a standing health-agent flag plus node auto-recovery).
