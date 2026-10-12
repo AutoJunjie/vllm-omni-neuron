@@ -224,6 +224,28 @@ def main() -> None:
     # Realistic routing: the same top-8-of-64 distribution the model sees (12.5% live).
     weights = routing(flat.to("cpu"), gate_router.to("cpu")).to(device)
 
+    reference = {}
+
+    def check(label, fn):
+        """Compare a routed-expert graph to float32 dense math on the host."""
+        if "ref" not in reference:
+            t_cpu, w_cpu = flat.to("cpu").float(), weights.to("cpu").float()
+            gu, dn = gate_up.to("cpu").float(), down.to("cpu").float()
+            reference["ref"] = sum(
+                torch.matmul(F.silu(t_cpu @ gu[e, :, 0]) * (t_cpu @ gu[e, :, 1]), dn[e])
+                * w_cpu[:, e : e + 1]
+                for e in range(local_experts)
+            )
+        ref = reference["ref"]
+        got = _compile(fn, f"moe_check_{label.replace('-', '_')}")(flat, weights, gate_up, down)
+        got = got.to("cpu").float()
+        worst = ((got - ref).abs().max() / ref.abs().max()).item()
+        rel_l2 = (torch.linalg.vector_norm(got - ref) / torch.linalg.vector_norm(ref)).item()
+        print(
+            f"[check] {label}: vs float32 dense, max {worst:.3e}, relative L2 {rel_l2:.3e}",
+            flush=True,
+        )
+
     if "moe-dense" in want:
 
         def moe_dense(t, w, gate_up, down):
@@ -237,6 +259,7 @@ def main() -> None:
             return out
 
         results["moe-dense"] = _time("moe-dense", moe_dense, flat, weights, gate_up, down)
+        check("moe-dense", moe_dense)
 
     if "moe-blockwise" in want:
         import vllm_neuron.functional as NF
@@ -283,18 +306,7 @@ def main() -> None:
 
         label = "moe-blockwise" if args.impl == "shard_on_block" else f"moe-{args.impl}"
         results["moe-blockwise"] = _time(label, moe_blockwise, flat, weights, gate_up, down)
-        # Numerics against the dense experts, computed on the host in float32.
-        got = _compile(moe_blockwise, f"moe_check_{args.impl}")(flat, weights, gate_up, down)
-        got = got.to("cpu").float()
-        t_cpu, w_cpu = flat.to("cpu").float(), weights.to("cpu").float()
-        gu, dn = gate_up.to("cpu").float(), down.to("cpu").float()
-        ref = sum(
-            torch.matmul(F.silu(t_cpu @ gu[e, :, 0]) * (t_cpu @ gu[e, :, 1]), dn[e])
-            * w_cpu[:, e : e + 1]
-            for e in range(local_experts)
-        )
-        err = ((got - ref).abs().max() / ref.abs().max()).item()
-        print(f"[check] {label}: relative max error vs float32 dense {err:.3e}", flush=True)
+        check(label, moe_blockwise)
 
     if "moe-mapping" in want or "moe-kernel" in want:
         import vllm_neuron.functional as NF
