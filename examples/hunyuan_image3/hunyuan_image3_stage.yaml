@@ -1,0 +1,75 @@
+# HunyuanImage-3.0-Instruct DiT-only text-to-image on one trn2.48xlarge.
+#
+# TP32 = 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2).
+# Attention is head-parallel (1 of the 32 query heads per rank, with each of the 8 KV
+# heads replicated across its 4 query ranks) and the 64 routed experts are
+# expert-parallel (2 per rank), which puts the 80B BF16 checkpoint at ~5 GB of weights
+# per core and halves per-core MoE work relative to TP16.
+#
+# `devices` is the visible logical-core range. Use hunyuan_image3_stage_tp16.yaml when
+# only 16 cores are free.
+stage_args:
+  - stage_id: 0
+    stage_type: diffusion
+    final_output: true
+    final_output_type: image
+    runtime:
+      process: true
+      devices: "0-31"
+      max_batch_size: 1
+    engine_args:
+      model_class_name: HunyuanImage3ForCausalMM
+      model_stage: diffusion
+      dtype: bfloat16
+      trust_remote_code: true
+      model_config:
+        # Prompt bucket. The prefill graph is compiled for this length and the prompt is
+        # right-padded to it; a different value is a separate (one-off) compile.
+        prefill_len: 512
+        # MoE implementation. `nki` (default) routes the routed experts through the
+        # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
+        # router selected; `torch` evaluates every local expert densely.
+        moe_kernel: nki
+        # The moe_cte loop. shard_on_i_hybrid runs a dynamic loop over only the blocks the
+        # router filled: 5.2 ms per layer on one rank at block 512, against 10.5 ms dense
+        # and 18.3 ms for shard_on_block, which walks every block whether live or not.
+        moe_implementation: shard_on_i_hybrid
+        # Tokens per kernel block. With the dynamic loop, 512 beats 1024 (5.9 ms) and 256
+        # (5.6 ms): smaller blocks pad less, until per-block overhead takes over.
+        moe_block_size: 512
+        # Split the UNet patch embed and final layer by GroupNorm group across the TP ranks
+        # instead of running them whole on every rank (~245 ms of a 760 ms step).
+        unet_parallel: true
+        # Cache-DiT DBCache over the denoise loop: skip all but the first layer on steps whose
+        # first-layer residual moved less than residual_diff_threshold since the last full
+        # step (4 warmup steps, at most 3 cached in a row). 0.12 caches ~25 of 50 steps:
+        # a 29.9 s request becomes 17.2 s at 32 dB PSNR to the uncached image. Cache-DiT's
+        # own default, 0.24, caches 33 (12.9 s, 27 dB, visibly softer). false = every step.
+        step_cache:
+          residual_diff_threshold: 0.12
+        # vllm-omni's TeaCache for this model: skip whole steps whose timestep embedding
+        # barely moved, reusing the last computed prediction. Changes the output; off by
+        # default. true = vllm-omni's calibrated coefficients and rel_l1_thresh 0.2, or a
+        # mapping with rel_l1_thresh / coefficients. Alternative to step_cache, not both.
+        tea_cache: false
+        # Where the output rank decodes. `neuron` runs the decoder on its core as seven
+        # staged 16-bit graphs with float32 reductions, ~2.5 s against 29 s on the host.
+        # Each new resolution or dtype compiles those graphs once (~45 min at 1024x1024
+        # with compile_vae_stages.py, ~2 h inside the first request). `cpu` is the
+        # float32 reference.
+        vae_device: neuron
+        # Device VAE dtype. float16 is as fast as bfloat16 and closer to the host decode
+        # (66.5 vs 58.7 dB PSNR on a real image); its GroupNorms square in a range-safe way.
+        vae_device_dtype: float16
+        # Logical core for the device VAE, in a worker process of its own. It must be free:
+        # outside `devices` (0-31) and not used by anything else on the node. Unset, the
+        # decoder shares the output rank's core with its backbone shard, which bfloat16
+        # barely fits beside and float16 does not (out of memory on the second request).
+        vae_device_core: 32
+        # Dtype of the host decode (vae_device: cpu, or a shape the device cannot take).
+        vae_dtype: float32
+      parallel_config:
+        tensor_parallel_size: 32
+        cfg_parallel_size: 1
+        ring_degree: 1
+        vae_patch_parallel_size: 1
