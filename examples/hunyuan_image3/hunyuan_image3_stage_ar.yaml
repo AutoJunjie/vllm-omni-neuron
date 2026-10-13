@@ -49,6 +49,12 @@ stage_args:
         # Split the UNet patch embed and final layer by GroupNorm group across the TP ranks
         # instead of running them whole on every rank (~245 ms of a 760 ms step).
         unet_parallel: true
+        # Context parallelism: the backbone's TP over 32 / context_parallel ranks, with the
+        # denoise tokens split across those TP blocks and K/V all-gathered in each layer.
+        # At 2 (TP16 x CP2) a step's all-reduces and the per-rank norms and router cover
+        # half the tokens: a CFG step 0.558 -> 0.453 s, a default request 17.2 -> 14.1 s.
+        # 1 = TP32 over every rank.
+        context_parallel: 2
         # Cache-DiT DBCache over the denoise loop: skip all but the first layer on steps whose
         # first-layer residual moved less than residual_diff_threshold since the last full
         # step (4 warmup steps, at most 3 cached in a row). 0.12 caches ~25 of 50 steps:

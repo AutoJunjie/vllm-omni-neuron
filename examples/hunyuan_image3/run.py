@@ -107,6 +107,20 @@ parser.add_argument(
     help="vllm-omni TeaCache rel_l1_thresh for the denoise loop (0.2 is its default for this "
     "model); 0 disables it. Default comes from the stage config (off).",
 )
+parser.add_argument(
+    "--context-parallel",
+    type=int,
+    default=None,
+    help="Split the denoise tokens this many ways, with the backbone's TP over "
+    "tensor-parallel-size / context-parallel ranks (e.g. 2: TP16 x CP2). Default from the "
+    "stage config (2 in the TP32 configs; 1 = TP over every rank).",
+)
+parser.add_argument(
+    "--num-layers",
+    type=int,
+    default=None,
+    help="Bring-up only: truncate the decoder stack (the image is meaningless).",
+)
 parser.add_argument("--profile", action="store_true", help="Run timed warm generations")
 parser.add_argument("--runs", type=int, default=1, help="Timed runs when --profile is set")
 args = parser.parse_args()
@@ -170,6 +184,8 @@ def main() -> None:
             ("prefill_len", args.prefill_len),
             ("moe_kernel", args.moe_kernel),
             ("vae_device", args.vae_device),
+            ("context_parallel", args.context_parallel),
+            ("num_layers", args.num_layers),
         )
         if value is not None
     }

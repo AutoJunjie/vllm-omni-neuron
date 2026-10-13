@@ -44,7 +44,7 @@ upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
 | --- | --- |
 | Instance | one `trn2.48xlarge` |
 | Stage config | [`examples/hunyuan_image3/hunyuan_image3_stage.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml) (TP32), [`..._tp16.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_tp16.yaml) (TP16) |
-| Parallelism | tensor/expert parallel only — no CP, no CFG parallelism, no VAE patch parallelism. The UNet patch embed and final layer are split across the TP ranks by GroupNorm group (`unet_parallel`, default on) |
+| Parallelism | TP16 x CP2 by default (`context_parallel: 2`): tensor/expert parallel over each half of the ranks, the denoise tokens split across the halves. `context_parallel: 1` is TP32. No CFG parallelism, no VAE patch parallelism. The UNet patch embed and final layer are split across all ranks by GroupNorm group (`unet_parallel`, default on). See [Context parallelism](#context-parallelism) |
 | Step caching | Cache-DiT DBCache over the denoise loop, `residual_diff_threshold` 0.12 by default (`step_cache`); vllm-omni's TeaCache for this model as an alternative (`tea_cache`, off). See [Step caching](#step-caching) |
 | Resolution | 1024x1024 (the compiled denoise graph is shape-specialised) |
 | Batch | one request at a time (`max_batch_size: 1`) |
@@ -53,7 +53,8 @@ upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
 
 At TP32 each rank owns 1 query head (each of the 8 KV heads is replicated across its 4
 query ranks) and 2 of the 64 routed experts, which puts roughly 5 GB of weights on each
-of the 24 GB logical cores. TP16 doubles both (2 query heads, 4 experts, ~10 GB).
+of the 24 GB logical cores. TP16 doubles both (2 query heads, 4 experts, ~10 GB); so does
+TP16 x CP2, the default, where ranks `r` and `r + 16` hold the same shard.
 
 ## Execution model
 
@@ -196,18 +197,24 @@ Per-request stage timings are written to
 
 ## Measured performance
 
-**Current defaults** (2026-10-12): one `trn2.48xlarge`, TP32, 1024x1024, 50 steps, CFG 2.5,
-seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm requests:
+**Current defaults** (2026-10-13): one `trn2.48xlarge`, TP16 x CP2, 1024x1024, 50 steps,
+CFG 2.5, seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm requests,
+`run.py --profile --runs 3`:
 
-| Request | Steps run / 50 | Denoise | VAE | Request, `run.py --profile` | Request, `/v1/chat/completions` |
+| Request | Steps run / 50 | Denoise | VAE | Request | TP32 (2026-10-12) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 27.89 s (0.558 / step) | 1.88 s | 29.89 s | -- |
-| **DiT only, default** | 25 | **15.17 s** | 1.85 s | **17.15 s** | 17.79-17.89 s |
-| **`bot_task: think` (`hunyuan_image3_stage_ar.yaml`), default** | 25 | **17.47 s** | 1.86 s | -- | **28.57-28.60 s** (AR 8.4 s, 537 tokens) |
+| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 22.63 s (0.453 / step) | 1.87 s | 24.60 s | 29.89 s (0.558 / step) |
+| **DiT only, default** | 25 | **12.16 s** | 1.88 s | **14.14 s** | 17.15 s |
+| `bot_task: think` (`hunyuan_image3_stage_ar.yaml`), no CFG, no caching | 50 | 13.22 s (0.264 / step) | 1.87 s | 24.0 s (AR 8.7 s, 544 tokens, 15.7 ms / token) | 27.48 s |
 
-The served and offline images for the same prompt and seed are byte-identical. The
-cached image is 32.1 dB PSNR to the uncached one for the DiT-only prompt and 33.8 dB for
-the think one; see [Step caching](#step-caching) for the trade-off.
+The last row is the setting of the GPU comparisons (vLLM-Omni, no CFG, no step cache):
+the DiT stage there is 13.68 s on a g7e and 6.03 s on an H100, against 15.1 s here.
+
+At TP32 the cached image was 32.1 dB PSNR to the uncached one for the DiT-only prompt and
+33.8 dB for the think one, and the served and offline images were byte-identical (served
+over `/v1/chat/completions`: 17.79-17.89 s DiT only, 28.57-28.60 s think); see
+[Step caching](#step-caching) for the trade-off. The served path was not re-measured at
+TP16 x CP2.
 
 The tables below are the history of the earlier defaults. One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG batch of 2
 (`guidance_scale` 2.5), `moe_kernel: nki`. Measured 2026-10-11, from
@@ -324,6 +331,39 @@ warm request from 39.94 s to 29.89 s. On identical inputs, step by step, it is 5
 from float32 against 5.64e-02 for the replicated path, and the images are 35.2 dB apart
 -- the usual drift of a reordered accumulation over 50 steps. A fused GroupNorm + SiLU
 kernel, as vllm-omni has for CUDA, would save less than 0.5 ms a step after the split.
+
+### Context parallelism
+
+With the UNet split, the 32 decoder layers are the step, and a TP32 profile of a no-CFG
+step put 69 ms of its 329 ms in the 64 all-reduces and another ~40 ms in work every TP
+rank repeats on every token (RMSNorm, the float32 router). `context_parallel: 2` runs the
+backbone at TP16 over ranks 0-15 and 16-31 -- one row of the trn2 chip torus each -- and
+gives each half the tokens: CP pairs `(r, r + 16)` are neighbouring chips at the same
+core offset. In each layer the pair all-gathers its image K/V (one KV head per rank, 1 MB);
+the final layer gathers the tokens back, and the UNet stays split over all 32 ranks.
+
+`bench_allreduce.py --only tpcp` measured the collectives first: a 16.8 MB all-reduce
+within a TP16 group, both groups at once, takes 0.381 ms (64 a step: 24 ms, against 55 ms
+for 33.5 MB at TP32), and the K/V all-gather 0.071 ms (2.3 ms a step). A step went from
+0.338 s to 0.264 s without CFG and from 0.558 s to 0.453 s with it. On identical inputs
+the CFG prediction is 5.26e-02 from float32 at steps 0/25/49 (TP32: 5.25e-02) and
+3.60e-02 from the hybrid-MoE trajectory over 50 steps (TP32: 3.49e-02); the free-running
+image is 34.5 dB from the teacher-forced one, the usual reordering drift.
+
+The AR decode is bound by reading weights, and at TP16 each rank would read twice as many
+(23.8 ms a token against 15.5 ms at TP32). So the two ranks holding a shard split it for
+decode -- half the query heads, local experts, shared-MLP columns and LM-head rows each --
+and all-reduce over all 32 ranks: 15.7 ms a token. Greedy decoding is still exact, but the
+reduction order differs from TP32, so the think text (and with it the image) can differ
+from a TP32 run's.
+
+The token split pads the 4097 step tokens (timestep token + 4096 image tokens) to 2 x 2049;
+the padding key is masked and only CP rank 0's first query is the timestep token. The CP
+gathers run one per batch row: one gather of the whole CFG batch followed by a
+`[cp, batch] -> [batch, cp]` transpose made neuronx-cc fail on the 32-layer CFG graph
+(`NCC_IBTN020 convertAccessPattern: step out of int16 range`) while 2 layers compiled.
+`context_parallel` must divide the world, and the TP size must still divide the 32 query
+heads, 64 experts and the vocabulary; TP8 x CP4 would not fit (~20 GB of weights a core).
 
 ### Step caching
 
@@ -748,9 +788,9 @@ peaks at the last step (t ≈ 9) for every path, float32 aside.
 - Over HTTP a request cannot choose `bot_task` with vllm-omni 0.24; the stage config's
   `model_config.bot_task` applies to all requests.
 - The TP16 stage config carries the same defaults (`unet_parallel`, `step_cache`) but was
-  not re-measured with them on device.
-- No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
-  FP8.
+  not re-measured with them on device. It stays at `context_parallel: 1`: CP over 16
+  cores would mean TP8, which does not fit.
+- No conditioning-image (IT2I / image edit) path, no FP8.
 - The AR is greedy only, for an explicit image size (no `auto` aspect-ratio prediction),
   one request at a time, and serial with the DiT on the same cores rather than pipelined.
   Its numerics are checked against the reference math, not against an H100 token stream.

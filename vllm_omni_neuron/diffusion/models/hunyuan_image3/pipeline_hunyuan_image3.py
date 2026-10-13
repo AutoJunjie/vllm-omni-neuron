@@ -56,6 +56,8 @@ from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineL
 
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
     NeuronHunyuanImage3Transformer,
+    cp_gather_tokens,
+    cp_local_tokens,
     default_prefill_len,
     nki_attention_enabled,
     nki_mlp_enabled,
@@ -221,6 +223,9 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         use_nki_attention = nki_attention_enabled(model_config)
         moe_block_size = int(model_config.get("moe_block_size", 512))
         moe_implementation = str(model_config.get("moe_implementation", "shard_on_i_hybrid"))
+        # Split the denoise step's tokens this many ways, with the backbone's TP over
+        # world / context_parallel ranks (NeuronHunyuanImage3Transformer).
+        context_parallel = int(model_config.get("context_parallel", 1))
         # Split the patch embed and final layer by GroupNorm group across the TP ranks
         # (unet_parallel.py) instead of running them whole on every rank.
         self.unet_parallel = bool(model_config.get("unet_parallel", True))
@@ -263,6 +268,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             use_nki_attention=use_nki_attention,
             moe_block_size=moe_block_size,
             moe_implementation=moe_implementation,
+            context_parallel=context_parallel,
         )
 
         hidden_size = int(config.hidden_size)
@@ -392,14 +398,16 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             # The cache decision runs on the host; to() moves self.time_embed to the core.
             # Held outside the module tree so to() and the state dict never see it.
             self.__dict__["_host_time_embed"] = copy.deepcopy(self.time_embed).eval()
-        if self.unet_parallel and self.model.tp_size > 1:
+        model = self.model
+        if self.unet_parallel and model.world_size > 1:
+            # Over every rank of the stage, whatever the backbone's TP x CP split.
             self._unet_shard = UNetShard(
-                self.patch_embed, self.final_layer, self.model.tp_rank, self.model.tp_size
+                self.patch_embed, self.final_layer, model.world_rank, model.world_size
             )
-            self._unet_shard.group = self.model.tp_group
+            self._unet_shard.group = model.world_group
             logger.info(
-                "HunyuanImage3: patch embed / final layer split across %d TP ranks",
-                self.model.tp_size,
+                "HunyuanImage3: patch embed / final layer split across %d ranks",
+                model.world_size,
             )
 
     def _replicated_weight_targets(self) -> dict[str, tuple[str, torch.Tensor, bool]]:
@@ -472,7 +480,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         else:
             image_tokens, token_h, token_w = _unet_down_tokens(self.patch_embed, latents, t_emb)
         timestep_token = self.timestep_emb(timestep).reshape(latents.shape[0], 1, -1)
-        return torch.cat((timestep_token, image_tokens), dim=1), token_h, token_w
+        tokens = torch.cat((timestep_token, image_tokens), dim=1)
+        if self.model.cp_size > 1:
+            tokens = cp_local_tokens(tokens, self.model.cp_size, self.model.cp_rank)
+        return tokens, token_h, token_w
 
     def _unembed_step_output(
         self, hidden_states: torch.Tensor, timestep: torch.Tensor, token_h: int, token_w: int
@@ -480,11 +491,12 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         """Final layer: the image tokens back to a latent-shaped prediction."""
         shard = self._unet_shard
         t_emb = self.time_embed_2(timestep)
+        if self.model.cp_size > 1:
+            hidden_states = cp_gather_tokens(hidden_states, self.model.cp_size, self.model.cp_group)
+        image_tokens = hidden_states[:, 1 : 1 + token_h * token_w, :]
         if shard is not None:
-            return unet_up_image(
-                shard, hidden_states[:, 1:, :], t_emb, token_h, token_w, shard.all_gather
-            )
-        return _unet_up_image(self.final_layer, hidden_states[:, 1:, :], t_emb, token_h, token_w)
+            return unet_up_image(shard, image_tokens, t_emb, token_h, token_w, shard.all_gather)
+        return _unet_up_image(self.final_layer, image_tokens, t_emb, token_h, token_w)
 
     def _denoise_step_graph(
         self,
@@ -527,16 +539,30 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
 
         Returns the first layer's output, its residual, and
         ``mean|R_prev - R| / mean|R_prev|`` as a one-element tensor. Every TP rank holds
-        the same (all-reduced) hidden states, so every rank computes the same diff.
+        the same (all-reduced) hidden states, so every rank computes the same diff; with
+        context parallelism the CP ranks sum their live tokens' shares first.
         """
-        hidden_in, _, _ = self._embed_step_inputs(latents, timestep)
+        hidden_in, token_h, token_w = self._embed_step_inputs(latents, timestep)
         hidden = self.model.layers[0].forward_denoise(
             hidden_in, cos, sin, (timestep_key_bias, image_key_bias), prompt_key, prompt_value
         )
         residual = hidden - hidden_in
         previous = previous_residual.float()
-        diff = (previous - residual.float()).abs().mean() / previous.abs().mean()
-        return hidden, residual, diff.reshape(1)
+        model = self.model
+        if model.cp_size == 1:
+            diff = (previous - residual.float()).abs().mean() / previous.abs().mean()
+            return hidden, residual, diff.reshape(1)
+        local = hidden.shape[1]
+        position = model.cp_rank * local + torch.arange(local, device=hidden.device)
+        live = (position < 1 + token_h * token_w).to(torch.float32).reshape(1, local, 1)
+        sums = torch.stack(
+            (
+                ((previous - residual.float()).abs() * live).sum(),
+                (previous.abs() * live).sum(),
+            )
+        )
+        torch.distributed.all_reduce(sums, group=model.cp_group)
+        return hidden, residual, (sums[0] / sums[1]).reshape(1)
 
     def _cache_rest_graph(
         self,
@@ -634,7 +660,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         token_h, token_w = latents.shape[2] // patch, latents.shape[3] // patch
         previous = cache.residual
         if previous is None:
-            shape = (latents.shape[0], 1 + token_h * token_w, int(self.hf_config.hidden_size))
+            tokens = -(-(1 + token_h * token_w) // self.model.cp_size)
+            shape = (latents.shape[0], tokens, int(self.hf_config.hidden_size))
             if self._zero_residual is None or tuple(self._zero_residual.shape) != shape:
                 # Only read before the first full step, which never caches.
                 self._zero_residual = torch.zeros(shape, dtype=self.model.dtype).to(self.device)
@@ -688,6 +715,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         collapses to a single vector. Reading them out of the real mask — rather than
         assuming where the full-attention block starts — keeps this exact whichever side
         of the span the timestep token falls on.
+
+        With context parallelism the image span is padded to ``cp`` equal slices (the
+        padding columns masked), and only CP rank 0 holds the timestep token: the other
+        ranks' first query is an image token, so their "timestep" bias is the image one.
         """
         total = attention_mask.shape[-1]
         stop = prompt_len + image_len
@@ -727,18 +758,21 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 "the whole prompt prefix."
             )
 
+        cp_size = self.model.cp_size
+        columns = self.prefill_len + -(-image_len // cp_size) * cp_size
+
         def build(row: torch.Tensor) -> torch.Tensor:
-            bias = torch.full(
-                (1, 1, 1, self.prefill_len + image_len), _MASK_BIAS, dtype=torch.float32
-            )
+            bias = torch.full((1, 1, 1, columns), _MASK_BIAS, dtype=torch.float32)
             bias[..., :prompt_len] = 0.0
-            bias[0, 0, 0, self.prefill_len :] = torch.where(
+            bias[0, 0, 0, self.prefill_len : self.prefill_len + image_len] = torch.where(
                 row[prompt_len:],
                 torch.zeros((), dtype=torch.float32),
                 torch.full((), _MASK_BIAS, dtype=torch.float32),
             )
             return bias.to(self.device)
 
+        if self.model.cp_rank > 0:
+            return build(image_row), build(image_row)
         return build(timestep_row), build(image_row)
 
     def _prompt_inputs(self, input_ids: torch.Tensor, cos, sin, prompt_len: int):
@@ -781,6 +815,11 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         positions = torch.cat((timestep_positions, image_positions), dim=1)
         step_cos = real_batched_index_select(cos, 1, positions).float()
         step_sin = real_batched_index_select(sin, 1, positions).float()
+        if self.model.cp_size > 1:
+            step_cos, step_sin = (
+                cp_local_tokens(table, self.model.cp_size, self.model.cp_rank)
+                for table in (step_cos, step_sin)
+            )
         return step_cos.to(self.device), step_sin.to(self.device)
 
     # ---- execution ---------------------------------------------------------
@@ -848,6 +887,10 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             # the text, as upstream's ar2diffusion hands it over (bot_task back to auto).
             text_prompt = prompt[0] if isinstance(prompt, list) else prompt
             self._ar_stats = self._ar_generator().generate(text_prompt, bot_task)
+            if self.model.cp_size > 1:
+                # Each TP block decodes on its own; the DiT prompt must be the same on
+                # every rank, so everyone takes rank 0's text.
+                self._ar_stats = _broadcast_from_rank0(self._ar_stats)
             if self.is_output_rank:
                 logger.info(
                     "HunyuanImage3 AR (%s): %d prompt + %d generated tokens, %.2f s decode, "
@@ -1466,3 +1509,12 @@ class _TeaCache:
             "skipped_steps": skipped,
             "rel_l1_thresh": self.threshold,
         }
+
+
+def _broadcast_from_rank0(value):
+    """``value`` as rank 0 has it, on every TP rank (host-side, over the gloo group)."""
+    from vllm.distributed.parallel_state import get_tp_group
+
+    holder = [value]
+    torch.distributed.broadcast_object_list(holder, src=0, group=get_tp_group().cpu_group)
+    return holder[0]
