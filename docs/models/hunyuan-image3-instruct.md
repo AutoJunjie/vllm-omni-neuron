@@ -44,7 +44,7 @@ upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
 | --- | --- |
 | Instance | one `trn2.48xlarge` |
 | Stage config | [`examples/hunyuan_image3/hunyuan_image3_stage.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml) (TP32), [`..._tp16.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_tp16.yaml) (TP16) |
-| Parallelism | TP16 x CP2 by default (`context_parallel: 2`): tensor/expert parallel over each half of the ranks, the denoise tokens split across the halves. `context_parallel: 1` is TP32. No CFG parallelism, no VAE patch parallelism. The UNet patch embed and final layer are split across all ranks by GroupNorm group (`unet_parallel`, default on). See [Context parallelism](#context-parallelism) |
+| Parallelism | TP16 x CP2 by default (`context_parallel: 2`): tensor/expert parallel over each half of the ranks; with CFG each half runs one CFG branch (`cfg_parallel`, default on), without it the denoise tokens are split across the halves. `context_parallel: 1` is TP32. No VAE patch parallelism. The UNet patch embed and final layer are split across all ranks by GroupNorm group (`unet_parallel`, default on). See [Context parallelism](#context-parallelism) |
 | Step caching | Cache-DiT DBCache over the denoise loop, `residual_diff_threshold` 0.12 by default (`step_cache`); vllm-omni's TeaCache for this model as an alternative (`tea_cache`, off). See [Step caching](#step-caching) |
 | Resolution | 1024x1024 (the compiled denoise graph is shape-specialised) |
 | Batch | one request at a time (`max_batch_size: 1`) |
@@ -203,8 +203,8 @@ CFG 2.5, seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm re
 
 | Request | Steps run / 50 | Denoise | VAE | Request | TP32 (2026-10-12) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 22.63 s (0.453 / step) | 1.87 s | 24.60 s | 29.89 s (0.558 / step) |
-| **DiT only, default** | 25 | **12.16 s** | 1.88 s | **14.14 s** | 17.15 s |
+| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 22.06-22.13 s (0.442 / step) | 1.87 s | 24.07 s | 29.89 s (0.558 / step) |
+| **DiT only, default** | 25 | **11.97-12.04 s** | 1.87 s | **13.94-14.01 s** | 17.15 s |
 | `bot_task: think` (`hunyuan_image3_stage_ar.yaml`), no CFG, no caching | 50 | 13.22 s (0.264 / step) | 1.87 s | 24.0 s (AR 8.7 s, 544 tokens, 15.7 ms / token) | 27.48 s |
 
 The last row is the setting of the GPU comparisons (vLLM-Omni, no CFG, no step cache):
@@ -364,6 +364,19 @@ gathers run one per batch row: one gather of the whole CFG batch followed by a
 (`NCC_IBTN020 convertAccessPattern: step out of int16 range`) while 2 layers compiled.
 `context_parallel` must divide the world, and the TP size must still divide the 32 query
 heads, 64 experts and the vocabulary; TP8 x CP4 would not fit (~20 GB of weights a core).
+
+With CFG, `cfg_parallel` (default on) uses the two TP16 blocks differently: block 0 runs
+the cond branch and block 1 the uncond one, each at batch 1 over all 4097 tokens, with no
+K/V exchange and each block prefilling only its own branch. Both branches share the
+latents and timestep, so the patch embed stays split over all 32 ranks at batch 1; the
+final layer gathers the two branches' hidden states into the CFG batch and runs over all
+32 ranks, so every rank returns both predictions. Which mode a step graph is in follows
+from its RoPE table's length (a share of the tokens, or all of them). Measured on the
+same code, Mars prompt, CFG 2.5: 0.452 s a step with the token split, 0.442 s with
+`cfg_parallel`; with cache-dit 0.12, 14.14 s and 13.94-14.01 s a request, caching the same
+25 steps. Teacher-forced, the CFG prediction is 5.40e-02 from float32 at steps 0/25/49 and
+3.58e-02 from the hybrid-MoE trajectory over 50 steps. (Timing one TP16 block alone on 16
+cores, 0.496 s a step, is not a stand-in for this: there the UNet split is over 16 ranks.)
 
 ### Step caching
 
@@ -781,8 +794,8 @@ peaks at the last step (t ≈ 9) for every path, float32 aside.
   `TORCH_NEURONX_NEFF_CACHE_DIR` at storage that outlives the container.
 - A prompt longer than `prefill_len` is an error, not a silent truncation. Raise the
   bucket (and pay one recompile).
-- No CFG parallelism yet: both CFG branches run in the same batch, so a guided request
-  costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
+- CFG parallelism needs the two TP16 blocks of `context_parallel: 2`; at TP32 or TP16
+  both CFG branches run in the same batch. `guidance_scale <= 1.0` runs a single branch.
 - Step caching is on by default and changes the image (32 dB PSNR to the uncached one at
   0.12). Set `step_cache: false` for every step to run.
 - Over HTTP a request cannot choose `bot_task` with vllm-omni 0.24; the stage config's

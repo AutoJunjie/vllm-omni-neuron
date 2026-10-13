@@ -9,6 +9,8 @@ on CP rank 0), ``cp_local_tokens`` for the hidden states and RoPE, and
 ``cp_gather_tokens`` for the output -- and must reproduce the TP2 step's output on
 every live token. The AR decode step, where the two CP ranks split their shared shard's
 heads, experts and LM-head rows and reduce over the world, must reproduce TP2's logits.
+CFG parallel -- each CP rank running one batch row whole, then gathering the batch --
+must reproduce TP2's batch too.
 
     VLLM_NEURON_CPU_MODE=1 python test/unit/test_hunyuan_image3_context_parallel.py
 """
@@ -54,6 +56,7 @@ def _worker(rank: int, port: int, checkpoint_dir: str) -> None:
     )
     from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
         NeuronHunyuanImage3Transformer,
+        cp_gather_batch,
         cp_gather_tokens,
         cp_local_tokens,
     )
@@ -118,6 +121,24 @@ def _worker(rank: int, port: int, checkpoint_dir: str) -> None:
                 out = cp_gather_tokens(out, cp, model.cp_group)
         outputs[cp] = out[:, :image_len]
 
+        if cp > 1:
+            # CFG parallel: this rank's batch row through the whole step, no K/V exchange.
+            row = slice(model.cp_rank, model.cp_rank + 1)
+            whole = NeuronHunyuanImage3Pipeline._key_biases(
+                fake_pipeline, attention_mask, prompt_len, image_len, split_tokens=False
+            )
+            with torch.no_grad():
+                row_kv = model.forward_prefill(
+                    prompt_embeds[row].contiguous(),
+                    prompt_cos[row].contiguous(),
+                    prompt_sin[row].contiguous(),
+                )
+                out = model.forward_denoise(
+                    step_hidden[row], step_cos[row], step_sin[row], whole, *row_kv,
+                    split_tokens=False,
+                )
+            outputs["cfg"] = cp_gather_batch(out, cp, model.cp_group)
+
         # AR decode of one token at slot 1 of the generated cache, as __init__ sets it up.
         ar = NeuronHunyuanImage3AR.__new__(NeuronHunyuanImage3AR)
         ar.model, ar.eps, ar.vocab_size = model, config.rms_norm_eps, vocab
@@ -158,6 +179,9 @@ def _worker(rank: int, port: int, checkpoint_dir: str) -> None:
     scale = outputs[1].abs().max().item()
     print(f"rank {rank}: TP1xCP2 vs TP2 max abs error {error:.3e} (relative {error / scale:.3e})")
     assert error / scale < 1e-5, f"rank {rank}: context-parallel step diverged: {error / scale}"
+    error = (outputs["cfg"] - outputs[1]).abs().max().item() / scale
+    print(f"rank {rank}: CFG parallel vs TP2 relative error {error:.3e}")
+    assert error < 1e-5, f"rank {rank}: CFG-parallel step diverged: {error}"
     error = (logits[2] - logits[1]).abs().max().item() / logits[1].abs().max().item()
     print(f"rank {rank}: split AR decode vs TP2 logits relative error {error:.3e}")
     assert error < 1e-5, f"rank {rank}: split AR decode diverged: {error}"

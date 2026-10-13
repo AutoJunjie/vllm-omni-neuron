@@ -55,6 +55,10 @@ stage_args:
         # half the tokens: a CFG step 0.558 -> 0.453 s, a default request 17.2 -> 14.1 s.
         # 1 = TP32 over every rank.
         context_parallel: 2
+        # With CFG, one CFG branch per TP16 block instead of half of both branches' tokens:
+        # no K/V exchange and a batch-1 patch embed. A CFG step 0.452 -> 0.442 s, a default
+        # request 14.14 -> 13.97 s. Steps without CFG split the tokens either way.
+        cfg_parallel: true
         # Cache-DiT DBCache over the denoise loop: skip all but the first layer on steps whose
         # first-layer residual moved less than residual_diff_threshold since the last full
         # step (4 warmup steps, at most 3 cached in a row). 0.12 caches ~25 of 50 steps:

@@ -116,6 +116,13 @@ parser.add_argument(
     "stage config (2 in the TP32 configs; 1 = TP over every rank).",
 )
 parser.add_argument(
+    "--cfg-parallel",
+    choices=["on", "off"],
+    default=None,
+    help="With CFG and context-parallel 2, run one CFG branch per TP block instead of "
+    "splitting the tokens. Default from the stage config (off).",
+)
+parser.add_argument(
     "--num-layers",
     type=int,
     default=None,
@@ -186,6 +193,7 @@ def main() -> None:
             ("vae_device", args.vae_device),
             ("context_parallel", args.context_parallel),
             ("num_layers", args.num_layers),
+            ("cfg_parallel", None if args.cfg_parallel is None else args.cfg_parallel == "on"),
         )
         if value is not None
     }

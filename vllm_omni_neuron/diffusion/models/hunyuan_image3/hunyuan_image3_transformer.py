@@ -698,9 +698,12 @@ class NeuronHunyuanAttention(nn.Module):
         )
         return self._finish(attn), key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True
+    ):
         query, key, value = self._project(hidden_states, cos, sin)
-        if self.cp_size > 1:
+        # split_tokens=False: each CP rank runs a whole CFG branch, so its own keys are all.
+        if self.cp_size > 1 and split_tokens:
             key, value = _cp_gather_kv(key, value, self.cp_size, self.cp_group)
         key = torch.cat((prompt_key, key), dim=1)
         value = torch.cat((prompt_value, value), dim=1)
@@ -993,11 +996,13 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         hidden_states = residual + self.mlp(normed)
         return hidden_states, key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True
+    ):
         residual = hidden_states
         normed = rms_norm(hidden_states, self.input_layernorm_weight, self.eps)
         attn_out = self.self_attn.forward_denoise(
-            normed, cos, sin, key_biases, prompt_key, prompt_value
+            normed, cos, sin, key_biases, prompt_key, prompt_value, split_tokens
         )
         hidden_states = residual + attn_out
         residual = hidden_states
@@ -1116,8 +1121,12 @@ class NeuronHunyuanImage3Transformer(nn.Module):
             kv.append(value)
         return tuple(kv)
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv):
-        """One denoising step over ``[timestep token] + image tokens``."""
+    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv, split_tokens=True):
+        """One denoising step over ``[timestep token] + image tokens``.
+
+        With context parallelism, ``split_tokens`` says whether this rank holds a share
+        of the tokens (the CP ranks exchange K/V) or a whole CFG branch of its own.
+        """
         if len(prompt_kv) != 2 * self.num_layers:
             raise ValueError(
                 f"expected {2 * self.num_layers} prompt K/V tensors, got {len(prompt_kv)}"
@@ -1130,6 +1139,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 key_biases,
                 prompt_kv[2 * layer_idx],
                 prompt_kv[2 * layer_idx + 1],
+                split_tokens,
             )
         return hidden_states
 
@@ -1416,3 +1426,11 @@ def _cp_gather_kv(key: torch.Tensor, value: torch.Tensor, cp_size: int, cp_group
     """Every CP rank's image keys and values: ``[B, cp * S, N, D]`` each."""
     both = cp_gather_tokens(torch.cat((key, value), dim=0), cp_size, cp_group)
     return both.chunk(2, dim=0)
+
+
+def cp_gather_batch(tokens: torch.Tensor, cp_size: int, cp_group) -> torch.Tensor:
+    """``[B, S, ...]`` per CP rank -> ``[cp * B, S, ...]``: each rank's rows, rank-major."""
+    tokens = tokens.contiguous()
+    out = tokens.new_empty((cp_size * tokens.shape[0], *tokens.shape[1:]))
+    dist.all_gather_into_tensor(out, tokens, group=cp_group)
+    return out
