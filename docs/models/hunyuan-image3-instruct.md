@@ -7,7 +7,7 @@ configurations, the two-graph execution model, NKI kernels, and known limits. --
 HunyuanImage3ForCausalMM, text-to-image, DiT, MoE, expert parallelism, NKI,
 torch.compile, libtorch-neuronx-lite -->
 <!-- meta: content_type: reference -->
-<!-- meta: date_updated: 2026-10-12 -->
+<!-- meta: date_updated: 2026-10-13 -->
 
 ## Overview
 
@@ -18,6 +18,10 @@ upstream vLLM-Omni's `vllm_omni/deploy/hunyuan_image3_dit.yaml`. A request with
 `bot_task` `think`, `recaption` or `think_recaption` first generates that text on the
 same backbone and then conditions the image on it -- see
 [Think / recaption (AR + DiT)](#think--recaption-ar--dit).
+
+For how the current defaults came about -- the bring-up, every optimization with its
+measurements, the mistakes, and a glossary for newcomers -- see the retrospective (in
+Chinese): [hunyuan-image3-trn2-retrospective.md](hunyuan-image3-trn2-retrospective.md).
 
 Registered architecture key: `HunyuanImage3ForCausalMM` — the Neuron pipeline replaces
 upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
