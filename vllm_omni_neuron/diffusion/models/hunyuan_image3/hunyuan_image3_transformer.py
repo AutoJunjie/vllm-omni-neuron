@@ -242,6 +242,81 @@ def _denoise_attend(query, key, value, scale, key_biases):
     return torch.cat((timestep_out, image_out[..., 1:]), dim=-1)
 
 
+@nki.jit
+def _hunyuan_prefix_attention_kernel(q, k, v, k_prior, v_prior, prior_used_len):
+    """Non-causal flash attention over ``[prior[:prior_used_len] | k]``, d-major output.
+
+    ``attention_cte``'s prefix caching: the right-padded prompt K/V is the prior, and
+    ``prior_used_len`` -- a runtime value -- masks its padding, so prompts of any length
+    share one NEFF. ``scale=1.0``: the caller pre-scales Q (prefix caching requires it).
+    """
+    return attention_cte(
+        q=q,
+        k=k,
+        v=v,
+        scale=1.0,
+        causal_mask=False,
+        k_prior=k_prior,
+        v_prior=v_prior,
+        prior_used_len=prior_used_len,
+        tp_q=True,
+        tp_k=True,
+        tp_out=True,
+        cache_softmax=False,
+        softmax_dtype=nl.float32,
+        mm_out_dtype=nl.float32,
+    )
+
+
+@nki_op("hunyuan_image3::prefix_attention_cte")
+def _hunyuan_nki_prefix_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_prior: torch.Tensor,
+    v_prior: torch.Tensor,
+    prior_used_len: torch.Tensor,
+) -> torch.Tensor:
+    return _wrap_nki_kernel(_hunyuan_prefix_attention_kernel)(
+        q, k, v, k_prior, v_prior, prior_used_len
+    )
+
+
+def _denoise_attend_kernel(query, key, value, prompt_key, prompt_value, scale, key_biases):
+    """:func:`_denoise_attend` with the image queries on ``attention_cte``.
+
+    Takes ``[B, S, N, D]`` operands before GQA expansion (the kernel interleaves KV heads
+    itself). An image query sees the whole prompt and every image key -- the pipeline
+    checks that against the generation mask -- so the prompt K/V is the kernel's prefix
+    with ``prior_used_len`` = the prompt length, read off the image key bias, and no other
+    mask is needed. The timestep query's row keeps the torch path and its own bias.
+    Returns the d-major ``[B, N, D, S_q]`` the output projection consumes.
+    """
+    timestep_bias, image_bias = key_biases
+    bsz, s_q, heads, dim = query.shape
+    prefill = prompt_key.shape[1]
+    used = (image_bias[0, 0, 0, :prefill] == 0).sum().to(torch.float32).reshape(1)
+
+    def by_head(t):  # [B, S, H, D] -> [B * H, S, D]
+        return t.transpose(1, 2).reshape(-1, t.shape[1], dim).contiguous()
+
+    out = _hunyuan_nki_prefix_attention(
+        by_head(query * scale),
+        by_head(key),
+        by_head(value),
+        by_head(prompt_key),
+        by_head(prompt_value),
+        used,
+    ).reshape(bsz, heads, dim, s_q)
+    groups = heads // key.shape[2]
+    keys = repeat_kv(torch.cat((prompt_key, key), dim=1), groups).transpose(1, 2)
+    values = repeat_kv(torch.cat((prompt_value, value), dim=1), groups).transpose(1, 2)
+    timestep_out = _masked_attend(
+        query[:, :1].transpose(1, 2), keys, values, scale, timestep_bias
+    )
+    return torch.cat((timestep_out, out[..., 1:]), dim=-1)
+
+
 # --- output projection ---------------------------------------------------------
 
 
@@ -602,9 +677,24 @@ class NeuronHunyuanAttention(nn.Module):
     upstream ``HunYuanAttention``.
     """
 
-    def __init__(self, config, tp_size: int, tp_group, use_kernel: bool = True):
+    def __init__(
+        self,
+        config,
+        tp_size: int,
+        tp_group,
+        use_kernel: bool = True,
+        cp_size: int = 1,
+        cp_group=None,
+        use_denoise_kernel: bool = False,
+    ):
         super().__init__()
         self.use_kernel = use_kernel
+        # The denoise attention on attention_cte (_denoise_attend_kernel) or in torch.
+        self.use_denoise_kernel = use_denoise_kernel
+        # Context parallelism splits the denoise step's tokens across ``cp_group``; each
+        # rank then attends with its own queries over every rank's keys and values.
+        self.cp_size = cp_size
+        self.cp_group = cp_group
         self.head_dim = int(config.attention_head_dim)
         self.total_num_heads = int(config.num_attention_heads)
         self.total_num_kv_heads = int(
@@ -692,8 +782,21 @@ class NeuronHunyuanAttention(nn.Module):
         )
         return self._finish(attn), key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True
+    ):
         query, key, value = self._project(hidden_states, cos, sin)
+        # split_tokens=False: each CP rank runs a whole CFG branch, so its own keys are all.
+        if self.cp_size > 1 and split_tokens:
+            key, value = _cp_gather_kv(key, value, self.cp_size, self.cp_group)
+        # The key biases cover the step's live keys; the CP split's padding key goes.
+        live = key_biases[1].shape[-1] - prompt_key.shape[1]
+        key, value = key[:, :live], value[:, :live]
+        if self.use_denoise_kernel and can_run_kernel(value):
+            attn = _denoise_attend_kernel(
+                query, key, value, prompt_key, prompt_value, self.scale, key_biases
+            )
+            return self._finish(attn)
         key = torch.cat((prompt_key, key), dim=1)
         value = torch.cat((prompt_value, value), dim=1)
         attn = _denoise_attend(
@@ -952,6 +1055,9 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         use_attention_kernel: bool = True,
         block_size: int = 512,
         moe_implementation: str = "shard_on_i_hybrid",
+        cp_size: int = 1,
+        cp_group=None,
+        use_denoise_attention_kernel: bool = False,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -959,7 +1065,13 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         self.input_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.post_attention_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.self_attn = NeuronHunyuanAttention(
-            config, tp_size, tp_group, use_attention_kernel
+            config,
+            tp_size,
+            tp_group,
+            use_attention_kernel,
+            cp_size,
+            cp_group,
+            use_denoise_attention_kernel,
         )
         self.mlp = NeuronHunyuanMoE(
             config,
@@ -983,11 +1095,13 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         hidden_states = residual + self.mlp(normed)
         return hidden_states, key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True
+    ):
         residual = hidden_states
         normed = rms_norm(hidden_states, self.input_layernorm_weight, self.eps)
         attn_out = self.self_attn.forward_denoise(
-            normed, cos, sin, key_biases, prompt_key, prompt_value
+            normed, cos, sin, key_biases, prompt_key, prompt_value, split_tokens
         )
         hidden_states = residual + attn_out
         residual = hidden_states
@@ -1011,17 +1125,36 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         use_nki_attention: bool = True,
         moe_block_size: int = 512,
         moe_implementation: str = "shard_on_i_hybrid",
+        context_parallel: int = 1,
+        use_denoise_attention_kernel: bool = False,
     ):
         super().__init__()
         self.config = config
-        self.tp_size = get_tensor_model_parallel_world_size()
-        self.tp_rank = get_tensor_model_parallel_rank()
-        self.tp_group = get_tp_group().device_group if self.tp_size > 1 else None
+        # The engine's TP world: every rank of the stage. The backbone shards over all
+        # of it, or with context_parallel=cp over world/cp-rank blocks of it, with the
+        # denoise tokens split cp ways across the blocks (see _context_parallel_groups).
+        self.world_size = get_tensor_model_parallel_world_size()
+        self.world_rank = get_tensor_model_parallel_rank()
+        self.world_group = get_tp_group().device_group if self.world_size > 1 else None
 
         # Make the TP group resolvable to its full replica-group partition so the
         # torch-native Neuron backend can legalize the all-reduces for SPMD
         # compilation (otherwise: "replica id #N not seen in replica groups").
-        register_replica_groups(tp_size=self.tp_size, cp_size=1)
+        register_replica_groups(tp_size=self.world_size, cp_size=1)
+
+        self.cp_size = int(context_parallel)
+        if self.cp_size < 1 or self.world_size % self.cp_size:
+            raise ValueError(
+                f"context_parallel={self.cp_size} must divide the {self.world_size} ranks"
+            )
+        self.tp_size = self.world_size // self.cp_size
+        self.tp_rank = self.world_rank % self.tp_size
+        self.cp_rank = self.world_rank // self.tp_size
+        self.tp_group, self.cp_group = self.world_group, None
+        if self.cp_size > 1:
+            self.tp_group, self.cp_group = _context_parallel_groups(
+                self.tp_size, self.cp_size, self.world_rank
+            )
 
         # The blockwise MoE mapping builder takes the group that shards each expert's
         # intermediate dimension. This backbone is pure expert parallelism — every rank
@@ -1065,6 +1198,9 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 use_nki_attention,
                 moe_block_size,
                 moe_implementation,
+                self.cp_size,
+                self.cp_group,
+                use_denoise_attention_kernel,
             )
             for layer_idx in range(self.num_layers)
         )
@@ -1086,8 +1222,12 @@ class NeuronHunyuanImage3Transformer(nn.Module):
             kv.append(value)
         return tuple(kv)
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv):
-        """One denoising step over ``[timestep token] + image tokens``."""
+    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv, split_tokens=True):
+        """One denoising step over ``[timestep token] + image tokens``.
+
+        With context parallelism, ``split_tokens`` says whether this rank holds a share
+        of the tokens (the CP ranks exchange K/V) or a whole CFG branch of its own.
+        """
         if len(prompt_kv) != 2 * self.num_layers:
             raise ValueError(
                 f"expected {2 * self.num_layers} prompt K/V tensors, got {len(prompt_kv)}"
@@ -1100,6 +1240,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 key_biases,
                 prompt_kv[2 * layer_idx],
                 prompt_kv[2 * layer_idx + 1],
+                split_tokens,
             )
         return hidden_states
 
@@ -1320,6 +1461,88 @@ def nki_attention_enabled(model_config: dict | None) -> bool:
     return choice == "nki"
 
 
+def denoise_attention_kernel_enabled(model_config: dict | None) -> bool:
+    """Resolve ``denoise_attention`` (``nki`` default): the denoise step's attention on
+    ``attention_cte`` with the prompt as its prefix, or the fused torch softmax."""
+    choice = str((model_config or {}).get("denoise_attention", "nki")).lower()
+    if choice not in ("nki", "torch"):
+        raise ValueError(
+            f"model_config.denoise_attention must be 'nki' or 'torch', got {choice!r}"
+        )
+    return choice == "nki"
+
+
 def default_prefill_len() -> int:
     """Default prompt bucket, overridable with ``model_config.prefill_len``."""
     return int(os.environ.get("VLLM_NEURON_HUNYUAN_PREFILL_LEN", "512"))
+
+
+# --- context parallelism -------------------------------------------------------------
+
+
+def _context_parallel_groups(tp_size: int, cp_size: int, rank: int):
+    """This rank's TP group and CP group for ``tp_size x cp_size`` ranks.
+
+    TP groups are contiguous rank blocks -- at TP16 on a trn2.48xlarge, chips 0-3 and
+    4-7, one row of the 4x4 torus each -- and a CP group takes the same position in
+    every block, so CP partners sit on neighbouring chips at the same core offset. Both
+    partitions are routable by the collectives runtime (measured with
+    ``examples/hunyuan_image3/bench_allreduce.py --only tpcp``). ``new_group`` is
+    collective, so every rank builds every group in the same order, then registers the
+    partition under its own group's name for the compiler's replica groups.
+    """
+    from vllm_omni_neuron.lite_compat import register_process_group_replica_groups
+
+    world = tp_size * cp_size
+    tp_parts = [list(range(base, base + tp_size)) for base in range(0, world, tp_size)]
+    cp_parts = [list(range(offset, world, tp_size)) for offset in range(tp_size)]
+    tp_group = cp_group = None
+    for part in tp_parts:
+        group = dist.new_group(part)
+        tp_group = group if rank in part else tp_group
+    for part in cp_parts:
+        group = dist.new_group(part)
+        cp_group = group if rank in part else cp_group
+    register_process_group_replica_groups(tp_group.group_name, tp_parts)
+    register_process_group_replica_groups(cp_group.group_name, cp_parts)
+    return tp_group, cp_group
+
+
+def cp_local_tokens(tokens: torch.Tensor, cp_size: int, cp_rank: int) -> torch.Tensor:
+    """This CP rank's share of ``[B, S, ...]``: zero-padded to ``cp`` equal slices first.
+
+    The padding rows are never read back (``cp_gather_tokens`` callers slice them off)
+    and their keys are masked by the key biases.
+    """
+    local = -(-tokens.shape[1] // cp_size)
+    pad = [0, 0] * (tokens.dim() - 2) + [0, local * cp_size - tokens.shape[1]]
+    return F.pad(tokens, pad)[:, cp_rank * local : (cp_rank + 1) * local]
+
+
+def cp_gather_tokens(tokens: torch.Tensor, cp_size: int, cp_group) -> torch.Tensor:
+    """``[B, S, ...]`` per CP rank -> ``[B, cp * S, ...]``, ranks in token order.
+
+    One all-gather per batch row: the gathered rows are then already in token order,
+    with no ``[cp, B] -> [B, cp]`` transpose of the whole result.
+    """
+    rows = []
+    for row in tokens.split(1, dim=0):
+        row = row.contiguous()
+        out = row.new_empty((cp_size, *row.shape[1:]))
+        dist.all_gather_into_tensor(out, row, group=cp_group)
+        rows.append(out.reshape(1, cp_size * row.shape[1], *row.shape[2:]))
+    return rows[0] if len(rows) == 1 else torch.cat(rows, dim=0)
+
+
+def _cp_gather_kv(key: torch.Tensor, value: torch.Tensor, cp_size: int, cp_group):
+    """Every CP rank's image keys and values: ``[B, cp * S, N, D]`` each."""
+    both = cp_gather_tokens(torch.cat((key, value), dim=0), cp_size, cp_group)
+    return both.chunk(2, dim=0)
+
+
+def cp_gather_batch(tokens: torch.Tensor, cp_size: int, cp_group) -> torch.Tensor:
+    """``[B, S, ...]`` per CP rank -> ``[cp * B, S, ...]``: each rank's rows, rank-major."""
+    tokens = tokens.contiguous()
+    out = tokens.new_empty((cp_size * tokens.shape[0], *tokens.shape[1:]))
+    dist.all_gather_into_tensor(out, tokens, group=cp_group)
+    return out
