@@ -60,6 +60,7 @@ from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer
     cp_gather_tokens,
     cp_local_tokens,
     default_prefill_len,
+    denoise_attention_kernel_enabled,
     nki_attention_enabled,
     nki_mlp_enabled,
 )
@@ -222,6 +223,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             raise ValueError(f"vae_device must be 'cpu' or 'neuron', got {self.vae_device!r}")
         use_nki_mlp = nki_mlp_enabled(model_config)
         use_nki_attention = nki_attention_enabled(model_config)
+        use_denoise_kernel = use_nki_attention and denoise_attention_kernel_enabled(model_config)
         moe_block_size = int(model_config.get("moe_block_size", 512))
         moe_implementation = str(model_config.get("moe_implementation", "shard_on_i_hybrid"))
         # Split the denoise step's tokens this many ways, with the backbone's TP over
@@ -275,6 +277,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             moe_block_size=moe_block_size,
             moe_implementation=moe_implementation,
             context_parallel=context_parallel,
+            use_denoise_attention_kernel=use_denoise_kernel,
         )
 
         hidden_size = int(config.hidden_size)
@@ -752,8 +755,9 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         assuming where the full-attention block starts — keeps this exact whichever side
         of the span the timestep token falls on.
 
-        With context parallelism the image span is padded to ``cp`` equal slices (the
-        padding columns masked), and only CP rank 0 holds the timestep token: the other
+        The biases cover the live keys only: a context-parallel split pads the step to
+        ``cp`` equal slices, and attention drops the padding key before it reads the
+        biases. Only CP rank 0 then holds the timestep token: the other
         ranks' first query is an image token, so their "timestep" bias is the image one.
         ``split_tokens=False`` (CFG parallel) builds the whole-step biases instead.
         """
@@ -787,6 +791,14 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             )
         image_row = image_rows[0]
         timestep_row = mask[0]
+        if self.model.layers[0].self_attn.use_denoise_kernel and not bool(
+            torch.all(image_row[prompt_len:])
+        ):
+            raise ValueError(
+                "denoise_attention: nki needs every generated image token to see the whole "
+                "step (the timestep token and every image token); set denoise_attention: "
+                "torch for this generation mask."
+            )
         if not bool(torch.all(image_row[:prompt_len])) or not bool(
             torch.all(timestep_row[:prompt_len])
         ):
@@ -796,7 +808,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             )
 
         cp_size = self.model.cp_size if split_tokens else 1
-        columns = self.prefill_len + -(-image_len // cp_size) * cp_size
+        # The step's live keys only: a CP split's padding key is dropped before attention.
+        columns = self.prefill_len + image_len
 
         def build(row: torch.Tensor) -> torch.Tensor:
             bias = torch.full((1, 1, 1, columns), _MASK_BIAS, dtype=torch.float32)

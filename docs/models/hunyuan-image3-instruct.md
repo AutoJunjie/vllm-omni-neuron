@@ -203,12 +203,12 @@ CFG 2.5, seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm re
 
 | Request | Steps run / 50 | Denoise | VAE | Request | TP32 (2026-10-12) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 22.06-22.13 s (0.442 / step) | 1.87 s | 24.07 s | 29.89 s (0.558 / step) |
-| **DiT only, default** | 25 | **11.97-12.04 s** | 1.87 s | **13.94-14.01 s** | 17.15 s |
-| `bot_task: think` (`hunyuan_image3_stage_ar.yaml`), no CFG, no caching | 50 | 13.22 s (0.264 / step) | 1.87 s | 24.0 s (AR 8.7 s, 544 tokens, 15.7 ms / token) | 27.48 s |
+| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 17.84-17.90 s (0.357 / step) | 1.87 s | 19.79-19.88 s | 29.89 s (0.558 / step) |
+| **DiT only, default** | 25 | **10.66-10.68 s** | 1.87 s | **12.58-12.66 s** | 17.15 s |
+| `bot_task: think` (`hunyuan_image3_stage_ar.yaml`), no CFG, no caching | 50 | 10.43-10.47 s (0.209 / step) | 1.87 s | 21.0-21.2 s (AR 8.7 s, 15.7 ms / token) | 27.48 s |
 
 The last row is the setting of the GPU comparisons (vLLM-Omni, no CFG, no step cache):
-the DiT stage there is 13.68 s on a g7e and 6.03 s on an H100, against 15.1 s here.
+the DiT stage there is 13.68 s on a g7e and 6.03 s on an H100, against 12.3 s here.
 
 At TP32 the cached image was 32.1 dB PSNR to the uncached one for the DiT-only prompt and
 33.8 dB for the think one, and the served and offline images were byte-identical (served
@@ -377,6 +377,25 @@ same code, Mars prompt, CFG 2.5: 0.452 s a step with the token split, 0.442 s wi
 25 steps. Teacher-forced, the CFG prediction is 5.40e-02 from float32 at steps 0/25/49 and
 3.58e-02 from the hybrid-MoE trajectory over 50 steps. (Timing one TP16 block alone on 16
 cores, 0.496 s a step, is not a stand-in for this: there the UNet split is over 16 ranks.)
+
+### Denoise attention kernel
+
+`denoise_attention: nki` (the default) runs the denoise step's image queries on nkilib's
+`attention_cte` instead of a torch softmax the compiler fuses, which materialised the
+float32 `[heads, queries, keys]` score matrix and spilled it (59 ms and 7.1 GB a step at
+TP32 without CFG). The kernel's prefix caching fits the step: the right-padded prompt K/V
+is the prefix, `prior_used_len` -- a runtime value, read off the image key bias -- masks
+its padding, and the step's own K/V is the non-causal active part. That needs every image
+token to see the whole prompt and the whole step, which the pipeline checks against the
+generation mask (and refuses the kernel otherwise). The timestep token sees only the
+prompt and itself, so its one row stays in torch with its own bias.
+
+`check_nki_kernels.py --tp-size 16 --only denoise_attention` compares it with the torch
+path on one core: 3.5e-03 relative at 1 x 2049 queries x 4097 keys, 4.1e-03 with 8 of 512
+prompt slots live, 4.2e-03 at 1 x 4097 x 4097 with a 2048 bucket. In the model a step goes
+from 0.442 s to 0.357 s with CFG (CFG parallel) and from 0.264 s to 0.209 s without;
+teacher-forced, the CFG prediction is 5.27e-02 from float32 (torch attention: 5.40e-02).
+`denoise_attention: torch` keeps the fused-softmax path.
 
 ### Step caching
 

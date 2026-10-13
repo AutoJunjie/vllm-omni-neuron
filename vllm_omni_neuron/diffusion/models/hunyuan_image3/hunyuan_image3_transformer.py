@@ -242,6 +242,81 @@ def _denoise_attend(query, key, value, scale, key_biases):
     return torch.cat((timestep_out, image_out[..., 1:]), dim=-1)
 
 
+@nki.jit
+def _hunyuan_prefix_attention_kernel(q, k, v, k_prior, v_prior, prior_used_len):
+    """Non-causal flash attention over ``[prior[:prior_used_len] | k]``, d-major output.
+
+    ``attention_cte``'s prefix caching: the right-padded prompt K/V is the prior, and
+    ``prior_used_len`` -- a runtime value -- masks its padding, so prompts of any length
+    share one NEFF. ``scale=1.0``: the caller pre-scales Q (prefix caching requires it).
+    """
+    return attention_cte(
+        q=q,
+        k=k,
+        v=v,
+        scale=1.0,
+        causal_mask=False,
+        k_prior=k_prior,
+        v_prior=v_prior,
+        prior_used_len=prior_used_len,
+        tp_q=True,
+        tp_k=True,
+        tp_out=True,
+        cache_softmax=False,
+        softmax_dtype=nl.float32,
+        mm_out_dtype=nl.float32,
+    )
+
+
+@nki_op("hunyuan_image3::prefix_attention_cte")
+def _hunyuan_nki_prefix_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_prior: torch.Tensor,
+    v_prior: torch.Tensor,
+    prior_used_len: torch.Tensor,
+) -> torch.Tensor:
+    return _wrap_nki_kernel(_hunyuan_prefix_attention_kernel)(
+        q, k, v, k_prior, v_prior, prior_used_len
+    )
+
+
+def _denoise_attend_kernel(query, key, value, prompt_key, prompt_value, scale, key_biases):
+    """:func:`_denoise_attend` with the image queries on ``attention_cte``.
+
+    Takes ``[B, S, N, D]`` operands before GQA expansion (the kernel interleaves KV heads
+    itself). An image query sees the whole prompt and every image key -- the pipeline
+    checks that against the generation mask -- so the prompt K/V is the kernel's prefix
+    with ``prior_used_len`` = the prompt length, read off the image key bias, and no other
+    mask is needed. The timestep query's row keeps the torch path and its own bias.
+    Returns the d-major ``[B, N, D, S_q]`` the output projection consumes.
+    """
+    timestep_bias, image_bias = key_biases
+    bsz, s_q, heads, dim = query.shape
+    prefill = prompt_key.shape[1]
+    used = (image_bias[0, 0, 0, :prefill] == 0).sum().to(torch.float32).reshape(1)
+
+    def by_head(t):  # [B, S, H, D] -> [B * H, S, D]
+        return t.transpose(1, 2).reshape(-1, t.shape[1], dim).contiguous()
+
+    out = _hunyuan_nki_prefix_attention(
+        by_head(query * scale),
+        by_head(key),
+        by_head(value),
+        by_head(prompt_key),
+        by_head(prompt_value),
+        used,
+    ).reshape(bsz, heads, dim, s_q)
+    groups = heads // key.shape[2]
+    keys = repeat_kv(torch.cat((prompt_key, key), dim=1), groups).transpose(1, 2)
+    values = repeat_kv(torch.cat((prompt_value, value), dim=1), groups).transpose(1, 2)
+    timestep_out = _masked_attend(
+        query[:, :1].transpose(1, 2), keys, values, scale, timestep_bias
+    )
+    return torch.cat((timestep_out, out[..., 1:]), dim=-1)
+
+
 # --- output projection ---------------------------------------------------------
 
 
@@ -603,10 +678,19 @@ class NeuronHunyuanAttention(nn.Module):
     """
 
     def __init__(
-        self, config, tp_size: int, tp_group, use_kernel: bool = True, cp_size: int = 1, cp_group=None
+        self,
+        config,
+        tp_size: int,
+        tp_group,
+        use_kernel: bool = True,
+        cp_size: int = 1,
+        cp_group=None,
+        use_denoise_kernel: bool = False,
     ):
         super().__init__()
         self.use_kernel = use_kernel
+        # The denoise attention on attention_cte (_denoise_attend_kernel) or in torch.
+        self.use_denoise_kernel = use_denoise_kernel
         # Context parallelism splits the denoise step's tokens across ``cp_group``; each
         # rank then attends with its own queries over every rank's keys and values.
         self.cp_size = cp_size
@@ -705,6 +789,14 @@ class NeuronHunyuanAttention(nn.Module):
         # split_tokens=False: each CP rank runs a whole CFG branch, so its own keys are all.
         if self.cp_size > 1 and split_tokens:
             key, value = _cp_gather_kv(key, value, self.cp_size, self.cp_group)
+        # The key biases cover the step's live keys; the CP split's padding key goes.
+        live = key_biases[1].shape[-1] - prompt_key.shape[1]
+        key, value = key[:, :live], value[:, :live]
+        if self.use_denoise_kernel and can_run_kernel(value):
+            attn = _denoise_attend_kernel(
+                query, key, value, prompt_key, prompt_value, self.scale, key_biases
+            )
+            return self._finish(attn)
         key = torch.cat((prompt_key, key), dim=1)
         value = torch.cat((prompt_value, value), dim=1)
         attn = _denoise_attend(
@@ -965,6 +1057,7 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         moe_implementation: str = "shard_on_i_hybrid",
         cp_size: int = 1,
         cp_group=None,
+        use_denoise_attention_kernel: bool = False,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -972,7 +1065,13 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         self.input_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.post_attention_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.self_attn = NeuronHunyuanAttention(
-            config, tp_size, tp_group, use_attention_kernel, cp_size, cp_group
+            config,
+            tp_size,
+            tp_group,
+            use_attention_kernel,
+            cp_size,
+            cp_group,
+            use_denoise_attention_kernel,
         )
         self.mlp = NeuronHunyuanMoE(
             config,
@@ -1027,6 +1126,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         moe_block_size: int = 512,
         moe_implementation: str = "shard_on_i_hybrid",
         context_parallel: int = 1,
+        use_denoise_attention_kernel: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -1100,6 +1200,7 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 moe_implementation,
                 self.cp_size,
                 self.cp_group,
+                use_denoise_attention_kernel,
             )
             for layer_idx in range(self.num_layers)
         )
@@ -1356,6 +1457,17 @@ def nki_attention_enabled(model_config: dict | None) -> bool:
         logger.warning(
             "HunyuanImage3 attention: NKI kernels disabled; attention and the output "
             "projection will run as torch ops."
+        )
+    return choice == "nki"
+
+
+def denoise_attention_kernel_enabled(model_config: dict | None) -> bool:
+    """Resolve ``denoise_attention`` (``nki`` default): the denoise step's attention on
+    ``attention_cte`` with the prompt as its prefix, or the fused torch softmax."""
+    choice = str((model_config or {}).get("denoise_attention", "nki")).lower()
+    if choice not in ("nki", "torch"):
+        raise ValueError(
+            f"model_config.denoise_attention must be 'nki' or 'torch', got {choice!r}"
         )
     return choice == "nki"
 

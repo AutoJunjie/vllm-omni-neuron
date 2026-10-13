@@ -49,6 +49,12 @@ parser.add_argument("--tp-size", type=int, default=32, help="TP degree the shape
 parser.add_argument("--tokens", type=int, default=8194, help="CFG batch x (1 + image tokens)")
 parser.add_argument("--prefill-len", type=int, default=512)
 parser.add_argument("--tolerance", type=float, default=2e-2)
+parser.add_argument("--prompt-len", type=int, default=300, help="denoise_attention: live prompt keys")
+parser.add_argument(
+    "--denoise-shape",
+    default="1x2049x4097",
+    help="denoise_attention: BATCHxQUERIESxIMAGE_KEYS per rank (TP16 x CP2: 1x2049x4097)",
+)
 parser.add_argument(
     "--mlp-tokens",
     default="8194,4x2048,16x512,32x256,64x128,256",
@@ -57,8 +63,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--only",
-    default="o_proj,attention,mlp",
-    help="Comma-separated subset of o_proj,attention,mlp. A run that first launched the\n"
+    default="o_proj,attention,denoise_attention,mlp",
+    help="Comma-separated subset of o_proj,attention,denoise_attention,mlp. A run that first launched the\n"
     "MLP kernel stopped producing output, so run it on its own once the others are\n"
     "known good — then the process under suspicion is the only one on the device.",
 )
@@ -229,6 +235,46 @@ def check_causal_attention(device) -> dict[str, float]:
     return {"causal_attention": _relative_error(actual, expected)}
 
 
+def check_denoise_attention(device) -> dict[str, float]:
+    """attention_cte with the prompt as prefix vs the torch two-bias denoise attention."""
+    torch.manual_seed(0)
+    heads = max(1, HEADS // args.tp_size)
+    kv_heads = max(1, KV_HEADS // args.tp_size)
+    batch, queries, keys = (int(x) for x in args.denoise_shape.split("x"))
+    prefill, prompt = args.prefill_len, args.prompt_len
+    q = torch.randn(batch, queries, heads, HEAD_DIM, dtype=torch.bfloat16)
+    k = torch.randn(batch, keys, kv_heads, HEAD_DIM, dtype=torch.bfloat16)
+    v = torch.randn(batch, keys, kv_heads, HEAD_DIM, dtype=torch.bfloat16)
+    pk = torch.randn(batch, prefill, kv_heads, HEAD_DIM, dtype=torch.bfloat16)
+    pv = torch.randn(batch, prefill, kv_heads, HEAD_DIM, dtype=torch.bfloat16)
+    scale = HEAD_DIM**-0.5
+    # The pipeline's two biases: the prompt's padding masked in both, the timestep row
+    # seeing only itself of the step, image rows seeing all of it.
+    image_bias = torch.full((1, 1, 1, prefill + keys), -1.0e30)
+    image_bias[..., :prompt] = 0.0
+    image_bias[..., prefill:] = 0.0
+    timestep_bias = image_bias.clone()
+    timestep_bias[..., prefill + 1 :] = -1.0e30
+
+    def kernel(qq, kk, vv, ppk, ppv, tb, ib):
+        return hyt._denoise_attend_kernel(qq, kk, vv, ppk, ppv, scale, (tb, ib))
+
+    compiled = _compile(kernel, "hunyuan_check_denoise_attention")
+    inputs = (q, k, v, pk, pv, timestep_bias, image_bias)
+    actual = compiled(*(t.to(device) for t in inputs)).to("cpu")
+
+    groups = heads // kv_heads
+    all_k = hyt.repeat_kv(torch.cat((pk, k), dim=1), groups).transpose(1, 2)
+    all_v = hyt.repeat_kv(torch.cat((pv, v), dim=1), groups).transpose(1, 2)
+    expected = hyt._denoise_attend(
+        q.transpose(1, 2).float(), all_k.float(), all_v.float(), scale, (timestep_bias, image_bias)
+    )
+    return {
+        "denoise_attention": _relative_error(actual, expected),
+        "denoise_attention_timestep_row": _relative_error(actual[..., :1], expected[..., :1]),
+    }
+
+
 def check_output_projection(device) -> dict[str, float]:
     """output_projection_cte vs matmul, at this rank's attention-output shape."""
     torch.manual_seed(0)
@@ -260,6 +306,7 @@ def main() -> None:
     checks = {
         "o_proj": check_output_projection,
         "attention": check_causal_attention,
+        "denoise_attention": check_denoise_attention,
         "mlp": check_swiglu_mlp,
     }
     unknown = set(selected) - set(checks)
