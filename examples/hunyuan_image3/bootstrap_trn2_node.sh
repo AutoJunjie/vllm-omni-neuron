@@ -8,7 +8,7 @@ set -u
 ROOT=/opt/dlami/nvme/omni-lite
 IMAGE=public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.24.0.1.1.0-neuronx-py313-sdk2.32.0-ubuntu24.04
 NS="--namespace omni-lite"
-BRANCH=feat/hunyuan-image3-neuron-lite
+BRANCH=main
 # The DLC ships libtorch-neuronx-lite 2.11.0.1.0.1284, which has no `_compiler`
 # submodule; the plugin's lite_compat needs it for device_count/nki_op/mesh registry.
 LITE_PIN="libtorch-neuronx-lite==2.11.0.1.0.2651+723ba691"

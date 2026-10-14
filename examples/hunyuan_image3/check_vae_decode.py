@@ -53,7 +53,7 @@ os.environ["NEURON_CC_FLAGS"] = _cc_flags
 os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
 os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "600")
 
-import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
+import vllm_omni_neuron.bootstrap  # noqa: E402, F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
 
 torch.nn.functional.gelu = torch.ops.aten.gelu.default
@@ -70,8 +70,8 @@ from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (  # noq
 )
 from vllm_omni_neuron.lite_compat import (  # noqa: E402
     ensure_current_device_index,
-    initialize as initialize_lite,
 )
+from vllm_omni_neuron.lite_compat import initialize as initialize_lite  # noqa: E402
 
 parser = argparse.ArgumentParser(description="HunyuanImage-3.0 VAE decode on device")
 parser.add_argument("--model-path", default="/workspace/models/HunyuanImage-3.0-Instruct")

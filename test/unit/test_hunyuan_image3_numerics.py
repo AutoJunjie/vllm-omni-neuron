@@ -10,7 +10,7 @@ covers at once:
   group's K and V heads);
 * the ``gate_and_up_proj`` chunk order (``down(chunk0 * silu(chunk1))``);
 * 2D RoPE applied *before* the per-head QK RMSNorm;
-* the float32 router -> top-k -> renormalise path expressed as a threshold;
+* the float32 router -> exact top-k (a mask over the expert ids) -> renormalise path;
 * the claim that splitting the first step into a causal prompt prefill plus a
   full-attention denoise step is exact for HunyuanImage3's generation mask, including
   the prompt right-padding masked by ``key_bias``.
@@ -196,25 +196,30 @@ def _ref_forward(weights, config, inputs_embeds, cos_full, sin_full, attn_mask):
 
 
 def _init_single_rank_parallel() -> None:
-    """Bring up a one-rank TP group so the backbone's size queries resolve."""
-    import vllm_omni_neuron.bootstrap  # noqa: F401
+    """Bring up one-rank groups the way the engine does (vLLM-Omni's parallel_state)."""
     from vllm.config import VllmConfig, set_current_vllm_config
-    from vllm.distributed import (
+    from vllm_omni.diffusion.distributed.parallel_state import (
         init_distributed_environment,
         initialize_model_parallel,
     )
 
+    import vllm_omni_neuron.bootstrap  # noqa: F401
+
     if torch.distributed.is_initialized():
         return
-    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-    os.environ.setdefault("MASTER_PORT", "29571")
-    init_distributed_environment(world_size=1, rank=0, local_rank=0, backend="gloo")
+    # The world group first: vLLM-Omni's own path picks a device by rank modulo the
+    # device count, which is 0 in CPU mode; given a live world it skips that.
+    method = f"tcp://127.0.0.1:{os.environ.get('MASTER_PORT', '29571')}"
+    torch.distributed.init_process_group("gloo", init_method=method, world_size=1, rank=0)
+    init_distributed_environment(
+        world_size=1, rank=0, distributed_init_method=method, local_rank=0, backend="gloo"
+    )
     # initialize_model_parallel reads the ambient vLLM config; keep the context open
     # for the rest of the process so the groups stay valid.
     context = set_current_vllm_config(VllmConfig())
     context.__enter__()
     _init_single_rank_parallel._context = context  # keep a reference alive
-    initialize_model_parallel(tensor_model_parallel_size=1)
+    initialize_model_parallel(tensor_parallel_size=1, backend="gloo")
 
 
 def test_prefill_denoise_split_matches_reference() -> None:

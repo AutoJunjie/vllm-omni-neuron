@@ -1,0 +1,88 @@
+# HunyuanImage-3.0-Instruct DiT text-to-image with the plugin's NeuronCFGParallelMixin
+# combining the two CFG replicas every step (model_config.cfg_combine: mixin,
+# cfg_mixin_pipeline.py) instead of the step graph gathering them. Same mesh as
+# hunyuan_image3_stage.yaml. No step cache; text-to-image only.
+stage_args:
+  - stage_id: 0
+    stage_type: diffusion
+    final_output: true
+    final_output_type: image
+    runtime:
+      process: true
+      devices: "0-31"
+      max_batch_size: 1
+    engine_args:
+      model_class_name: HunyuanImage3ForCausalMM
+      model_stage: diffusion
+      dtype: bfloat16
+      trust_remote_code: true
+      model_config:
+        # Prompt bucket. The prefill graph is compiled for this length and the prompt is
+        # right-padded to it; a different value is a separate (one-off) compile.
+        prefill_len: 512
+        # More prompt buckets (prefill_len is always one): each request, and its think /
+        # recaption text, takes the smallest that fits; each is its own prefill
+        # and denoise graphs, compiled on first use. A 1024x1024 conditioning image adds
+        # ~5.1k tokens (4096 VAE + 1024 ViT), the unified system prompt and think text more.
+        prefill_buckets: [512, 6144, 8192]
+        # MoE implementation. `nki` (default) routes the routed experts through the
+        # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
+        # router selected; `torch` evaluates every local expert densely.
+        moe_kernel: nki
+        # The moe_cte loop. shard_on_i_hybrid runs a dynamic loop over only the blocks the
+        # router filled: 5.2 ms per layer on one rank at block 512, against 10.5 ms dense
+        # and 18.3 ms for shard_on_block, which walks every block whether live or not.
+        moe_implementation: shard_on_i_hybrid
+        # Tokens per kernel block. With the dynamic loop, 512 beats 1024 (5.9 ms) and 256
+        # (5.6 ms): smaller blocks pad less, until per-block overhead takes over.
+        moe_block_size: 512
+        # Split the UNet patch embed and final layer by GroupNorm group across the TP ranks
+        # instead of running them whole on every rank (~245 ms of a 760 ms step).
+        unet_parallel: true
+        # Cache-DiT DBCache over the denoise loop: skip all but the first layer on steps whose
+        # first-layer residual moved less than residual_diff_threshold since the last full
+        # step (4 warmup steps, at most 3 cached in a row). 0.12 caches ~25 of 50 steps:
+        # a 29.9 s request becomes 17.2 s at 32 dB PSNR to the uncached image. Cache-DiT's
+        # own default, 0.24, caches 33 (12.9 s, 27 dB, visibly softer). false = every step.
+        step_cache: false
+        cfg_combine: mixin
+        # vllm-omni's TeaCache for this model: skip whole steps whose timestep embedding
+        # barely moved, reusing the last computed prediction. Changes the output; off by
+        # default. true = vllm-omni's calibrated coefficients and rel_l1_thresh 0.2, or a
+        # mapping with rel_l1_thresh / coefficients. Alternative to step_cache, not both.
+        tea_cache: false
+        # Where the output rank decodes. `neuron` runs the decoder on its core as seven
+        # staged 16-bit graphs with float32 reductions, ~2.5 s against 29 s on the host.
+        # Each new resolution or dtype compiles those graphs once (~45 min at 1024x1024
+        # with compile_vae_stages.py, ~2 h inside the first request). `cpu` is the
+        # float32 reference.
+        vae_device: neuron
+        # Device VAE dtype. float16 is as fast as bfloat16 and closer to the host decode
+        # (66.5 vs 58.7 dB PSNR on a real image); its GroupNorms square in a range-safe way.
+        vae_device_dtype: float16
+        # Split the device decode by image rows over ranks 0..N-1 (neighbouring cores of
+        # the first chip), each with a halo of rows and the GroupNorm statistics
+        # all-reduced, so the image matches the one-core decode (69.7 dB, max 1/255). Two
+        # halves fit beside a TP16 backbone shard (20.7 of 24 GiB) and decode in 1.16 s
+        # against 1.87 s on a core of their own. The alternative, vae_device_core: <core>,
+        # runs the whole decode in a worker on a free core outside `devices`; unset both
+        # and the whole decode shares the output rank's core, which fits only at TP32 in
+        # bfloat16 (at TP16 x CP2 it runs out of memory and every request decodes on the
+        # host). Fill its NEFF cache ahead of time with compile_vae_stages.py
+        # --vae-parallel 2; with vae_device: cpu it is unused.
+        vae_parallel: 2
+        # Dtype of the host decode (vae_device: cpu, or a shape the device cannot take).
+        vae_dtype: float32
+      parallel_config:
+        # TP16 x 2 CFG replicas over the 32 cores (pairs (r, r + 16), one CFG branch
+        # each; a request without CFG splits its denoise tokens across the pair). Against
+        # TP32: a step's all-reduces and the per-rank norms and router cover half the
+        # tokens, and there is no K/V exchange -- a CFG step 0.558 -> 0.442 s. The final
+        # layer gathers both branches inside the step graph (model_config.cfg_combine:
+        # in_graph, the default); cfg_combine: mixin hands the combine to the plugin's
+        # NeuronCFGParallelMixin instead (0.414 s/step against 0.358, see the model card).
+        # tensor_parallel_size: 32 with cfg_parallel_size: 1 is TP32 with sequential CFG.
+        tensor_parallel_size: 16
+        cfg_parallel_size: 2
+        ring_degree: 1
+        vae_patch_parallel_size: 1

@@ -25,6 +25,7 @@ import os
 os.environ.setdefault("VLLM_NEURON_CPU_MODE", "1")
 
 import torch  # noqa: E402
+from vllm_neuron.utils.weight_loader import sharding_weight_loader  # noqa: E402
 
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (  # noqa: E402
     _fused_chunk_sharded_loader,
@@ -33,7 +34,6 @@ from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer
     _stacked_gate_up_loader,
     _transpose_loader,
 )
-from vllm_neuron.utils.weight_loader import sharding_weight_loader  # noqa: E402
 
 HIDDEN = 4096
 HEADS = 32

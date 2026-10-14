@@ -1,11 +1,11 @@
 # HunyuanImage-3.0-Instruct AR (think / recaption) + DiT text-to-image on one trn2.48xlarge.
 # Same mesh as hunyuan_image3_stage.yaml; only the prompt bucket is larger.
 #
-# TP32 = 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2).
-# Attention is head-parallel (1 of the 32 query heads per rank, with each of the 8 KV
-# heads replicated across its 4 query ranks) and the 64 routed experts are
-# expert-parallel (2 per rank), which puts the 80B BF16 checkpoint at ~5 GB of weights
-# per core and halves per-core MoE work relative to TP16.
+# 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2) as two TP16
+# replicas, one CFG branch each (parallel_config). Attention is head-parallel (2 of the
+# 32 query heads per rank, each of the 8 KV heads shared by its 2 query ranks) and the
+# 64 routed experts are expert-parallel (4 per rank): ~10 GB of the 80B BF16 checkpoint
+# per core.
 #
 # `devices` is the visible logical-core range. Use hunyuan_image3_stage_tp16.yaml when
 # only 16 cores are free.
@@ -27,6 +27,11 @@ stage_args:
         # Prompt bucket. The prefill graph is compiled for this length and the prompt is
         # right-padded to it; a different value is a separate (one-off) compile.
         prefill_len: 2560
+        # More prompt buckets (prefill_len is always one): each request, and its think /
+        # recaption text, takes the smallest that fits; each is its own prefill
+        # and denoise graphs, compiled on first use. A 1024x1024 conditioning image adds
+        # ~5.1k tokens (4096 VAE + 1024 ViT), the unified system prompt and think text more.
+        prefill_buckets: [2560, 8192]
         # Generated tokens per AR request (think / recaption), at most. The AR prompt is
         # ~1260 tokens with the en_unified system prompt, so 2560 holds it plus 1024
         # generated tokens, and the DiT prompt that carries them.
@@ -70,15 +75,29 @@ stage_args:
         # Device VAE dtype. float16 is as fast as bfloat16 and closer to the host decode
         # (66.5 vs 58.7 dB PSNR on a real image); its GroupNorms square in a range-safe way.
         vae_device_dtype: float16
-        # Logical core for the device VAE, in a worker process of its own. It must be free:
-        # outside `devices` (0-31) and not used by anything else on the node. Unset, the
-        # decoder shares the output rank's core with its backbone shard, which bfloat16
-        # barely fits beside and float16 does not (out of memory on the second request).
-        vae_device_core: 32
+        # Split the device decode by image rows over ranks 0..N-1 (neighbouring cores of
+        # the first chip), each with a halo of rows and the GroupNorm statistics
+        # all-reduced, so the image matches the one-core decode (69.7 dB, max 1/255). Two
+        # halves fit beside a TP16 backbone shard (20.7 of 24 GiB) and decode in 1.16 s
+        # against 1.87 s on a core of their own. The alternative, vae_device_core: <core>,
+        # runs the whole decode in a worker on a free core outside `devices`; unset both
+        # and the whole decode shares the output rank's core, which fits only at TP32 in
+        # bfloat16 (at TP16 x CP2 it runs out of memory and every request decodes on the
+        # host). Fill its NEFF cache ahead of time with compile_vae_stages.py
+        # --vae-parallel 2; with vae_device: cpu it is unused.
+        vae_parallel: 2
         # Dtype of the host decode (vae_device: cpu, or a shape the device cannot take).
         vae_dtype: float32
       parallel_config:
-        tensor_parallel_size: 32
-        cfg_parallel_size: 1
+        # TP16 x 2 CFG replicas over the 32 cores (pairs (r, r + 16), one CFG branch
+        # each; a request without CFG splits its denoise tokens across the pair). Against
+        # TP32: a step's all-reduces and the per-rank norms and router cover half the
+        # tokens, and there is no K/V exchange -- a CFG step 0.558 -> 0.442 s. The final
+        # layer gathers both branches inside the step graph (model_config.cfg_combine:
+        # in_graph, the default); cfg_combine: mixin hands the combine to the plugin's
+        # NeuronCFGParallelMixin instead (0.414 s/step against 0.358, see the model card).
+        # tensor_parallel_size: 32 with cfg_parallel_size: 1 is TP32 with sequential CFG.
+        tensor_parallel_size: 16
+        cfg_parallel_size: 2
         ring_degree: 1
         vae_patch_parallel_size: 1
