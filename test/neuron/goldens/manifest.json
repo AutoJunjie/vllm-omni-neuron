@@ -1,0 +1,139 @@
+{
+  "cases": {
+    "edit": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-15T00:14Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_edit_starry_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "b4ecd1678460a849658b35de904cd43d7c8989ca23e4eeed0adc5afeb164ffbf",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "21cdd15",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "Turn the sky into a starry night, keep everything else unchanged.",
+        "--image",
+        "<goldens>/hunyuan_image3_edit_input.png"
+      ],
+      "sha256": "cdcd0a554ffbb18419260dbea466c56cc122c3ac8823cd593343185550b47b58",
+      "stage_config_sha256": "0927a1c3ecd338f5d2d7fbe6e61d7c14acc6f483217669027a3db371919e5d7c",
+      "warm_seconds": 18.03
+    },
+    "t2i": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-15T00:08Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_t2i_mars_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "a7a1446cb84c0957922de05edf1cfd145b98e7c643e106d1c15062d4a911984f",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "21cdd15",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed"
+      ],
+      "sha256": "a534311792d6a3510f76a9ccb2c245160a0a22075da54034ba76ef4ac04078e6",
+      "stage_config_sha256": "0927a1c3ecd338f5d2d7fbe6e61d7c14acc6f483217669027a3db371919e5d7c",
+      "warm_seconds": 12.15
+    },
+    "t2i_think": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-15T00:20Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_t2i_think_mars_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "6b708cc3d4e5edae16fff3293a00635e7085a268068126df83a1cdc451185d8a",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "21cdd15",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed",
+        "--bot-task",
+        "think",
+        "--stage-config",
+        "<examples>/hunyuan_image3_stage_ar.yaml"
+      ],
+      "sha256": "fd84c734dd4d4512407afdd18c75876585bc45bdf1a0e95d6c26ece1f8cb8dba",
+      "stage_config_sha256": "cf118575fb619969ad5c5fdc2ccc438ee15eb25a92d05045b97ea8f21917798d",
+      "warm_seconds": 21.2
+    },
+    "t2i_vae_tiles": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-15T00:25Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_t2i_vae_tiles_mars_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "a7a1446cb84c0957922de05edf1cfd145b98e7c643e106d1c15062d4a911984f",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "21cdd15",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed",
+        "--stage-config",
+        "<generated>/hunyuan_image3_stage_vae_tiles.yaml"
+      ],
+      "sha256": "cb0006d0c39a44395ef3bda9d9e7628eaa3228e8f5b96348a0f8ccca0f556d23",
+      "stage_config_sha256": "ccb5674e4f11707fde63a271b75c84b561f73a95001deac77247d537f1b94310",
+      "warm_seconds": 12.09
+    }
+  },
+  "inputs": {
+    "hunyuan_image3_edit_input.png": "a534311792d6a3510f76a9ccb2c245160a0a22075da54034ba76ef4ac04078e6"
+  }
+}
