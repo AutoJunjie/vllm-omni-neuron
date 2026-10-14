@@ -1,29 +1,40 @@
-# HunyuanImage-3.0-Instruct
+# HunyuanImage-3.0-Instruct Model Card
 
-<!-- meta: description: Model card for HunyuanImage-3.0-Instruct text-to-image
-generation on AWS Trainium with the vLLM Omni Neuron plugin — supported
-configurations, the two-graph execution model, NKI kernels, and known limits. -->
+<!-- meta: description: Model card for HunyuanImage-3.0-Instruct on AWS Trainium with
+the vLLM Omni Neuron plugin — supported features (text-to-image, image editing,
+think / recaption), the recommended 32-core TP16 x CFG2 configuration, latency,
+GenEval and three-tier accuracy results, and known limitations. -->
 <!-- meta: keywords: vLLM Omni, Neuron, Trainium, trn2, HunyuanImage-3.0,
-HunyuanImage3ForCausalMM, text-to-image, DiT, MoE, expert parallelism, NKI,
-torch.compile, libtorch-neuronx-lite -->
-<!-- meta: content_type: reference -->
-<!-- meta: date_updated: 2026-10-12 -->
+HunyuanImage3ForCausalMM, model card, text-to-image, image editing, DiT, MoE,
+tensor parallelism, CFG parallelism, NeuronCFGParallelMixin, VAE patch parallelism,
+Cache-DiT, NKI, torch.compile, GenEval -->
+<!-- meta: content_type: model-card -->
+<!-- meta: date_updated: 2026-10-15 -->
 
-## Overview
+## Introduction
 
-[`tencent/HunyuanImage-3.0-Instruct`](https://huggingface.co/tencent/HunyuanImage-3.0-Instruct)
-is an 80B-parameter mixture-of-experts diffusion transformer that generates images
-from text. By default the prompt goes straight to the diffusion stage, the same scope as
-upstream vLLM-Omni's `vllm_omni/deploy/hunyuan_image3_dit.yaml`. A request with
-`bot_task` `think`, `recaption` or `think_recaption` first generates that text on the
-same backbone and then conditions the image on it -- see
-[Think / recaption (AR + DiT)](#think--recaption-ar--dit).
+[HunyuanImage-3.0-Instruct](https://huggingface.co/tencent/HunyuanImage-3.0-Instruct) is
+Tencent's 80B-parameter mixture-of-experts multimodal model (64 routed experts, top-8;
+~13B active per token). One decoder-only backbone both generates text and denoises image
+latents: the prompt is prefilled causally, then the image's tokens are denoised by
+flow matching with full attention among themselves. It generates images from text, edits
+or composes from conditioning images, and can first reason about the request on the same
+backbone (`bot_task` `think`, `recaption`, `think_recaption`) before drawing.
 
-Registered architecture key: `HunyuanImage3ForCausalMM` — the Neuron pipeline replaces
-upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
-`model_class_name: HunyuanImage3ForCausalMM`.
+HunyuanImage-3.0-Instruct is supported for inference serving with
+[vLLM Omni](https://docs.vllm.ai/projects/vllm-omni/en/latest/) using the Neuron SDK on
+AWS Trainium2 (`trn2`).
 
-## Architecture
+**Compatible model checkpoints:**
+
+| Model | HuggingFace | Hardware | Quantization |
+|-------|-------------|----------|--------------|
+| HunyuanImage-3.0-Instruct | [tencent/HunyuanImage-3.0-Instruct](https://huggingface.co/tencent/HunyuanImage-3.0-Instruct) (validated at revision `2ec2c78bee7d4b94157341fba86c4c2c7b1858b2`) | Trn2 | BF16 |
+
+Registered architecture key: `HunyuanImage3ForCausalMM` -- the Neuron pipeline replaces
+upstream vLLM-Omni's `HunyuanImage3Pipeline` for that key, so a stage config only needs
+`model_class_name: HunyuanImage3ForCausalMM`. By default a prompt goes straight to the
+diffusion stage, the scope of upstream's `vllm_omni/deploy/hunyuan_image3_dit.yaml`.
 
 | Property | Value |
 | --- | --- |
@@ -33,29 +44,293 @@ upstream's `HunyuanImage3Pipeline` for that key, so a stage config only needs
 | Position encoding | 2D RoPE (theta 10000), applied before the QK norm |
 | Routed experts | 64, top-8, renormalised, intermediate 3072 |
 | Shared expert | 1, intermediate 3072 |
-| Activation | SwiGLU (`down(chunk0 * silu(chunk1))` over the fused `gate_and_up_proj`) |
 | Latents | 32 channels, VAE spatial factor 16 (1024x1024 -> 64x64 -> 4096 tokens) |
 | Scheduler | FlowMatchEulerDiscrete, shift 3.0 |
 | Checkpoint dtype | BF16 |
 
-## Supported configuration
+## Features
 
-| Setting | Value |
+Per-model feature availability for HunyuanImage-3.0-Instruct. See the
+[README](../../README.md) for configuration details.
+
+| Category | Feature | Status |
+|---|---|---|
+| **Generation** | Text-to-image | ✅ |
+| | Image editing / IT2I (`multi_modal_data.image`) | ✅ |
+| | Think / recaption on the backbone (AR + DiT, `bot_task`) | ✅ |
+| | 1024x1024 | ✅ |
+| | Other resolutions | Limited |
+| **Quantization** | BF16 | ✅ |
+| | FP8 | ❌ |
+| **Parallelism** | Tensor Parallelism (TP, `tensor_parallel_size`) | ✅ |
+| | CFG Parallelism (`cfg_parallel_size: 2`) | ✅ |
+| | Context Parallelism (`ring_degree: 2`, requests without CFG) | ✅ |
+| | Megatron Sequence Parallelism (`tp_sequence_parallel`) | ✅ |
+| | VAE row split (`vae_parallel: 2`) | ✅ |
+| | [VAE Patch Parallelism](https://docs.vllm.ai/projects/vllm-omni/en/latest/design/feature/vae_parallel/) (`vae_patch_parallel_size`) | ✅ |
+| **Performance** | Classifier-Free Guidance | ✅ |
+| | Step caching (Cache-DiT DBCache, `step_cache`; TeaCache, `tea_cache`) | ✅ |
+| | VAE decode and encode on device | ✅ |
+| | Continuous request batching | Limited |
+| **Compilation** | torch.compile | ✅ |
+
+**Status legend:**
+
+- ✅ Supported: integrated and tested for HunyuanImage-3.0-Instruct
+- Limited: other resolutions compile their own graphs on first use and are not
+  validated; an image over 1024 on a side decodes its VAE on the host. Concurrent
+  requests run serially rather than as a batched forward pass.
+- ❌ Not supported
+
+### Recommended configuration
+
+The recommended configuration runs on the 32 logical NeuronCores of one
+`trn2.48xlarge` (`NEURON_LOGICAL_NC_CONFIG=2`), matching the
+[stage config](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml):
+`tensor_parallel_size=16` x `cfg_parallel_size=2` = 32, `ring_degree=1`.
+
+CFG parallelism runs the conditional branch on one TP16 replica (ranks 0-15) and the
+unconditional one on the other (ranks 16-31), each over the whole step, with no K/V
+exchange. The final layer gathers both branches' hidden states inside the step graph
+(`model_config.cfg_combine: in_graph`, the default) and runs split over all 32 ranks, so
+every rank returns both predictions. `cfg_combine: mixin` uses the plugin's
+`NeuronCFGParallelMixin` instead
+([`hunyuan_image3_stage_cfgmixin.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_cfgmixin.yaml)):
+the same image within bf16 drift, 16% slower a step, because its combine is a graph of
+its own and each replica's final layer splits only over its 16 ranks.
+
+Within a replica the backbone is tensor and expert parallel: each rank holds 2 of the 32
+query heads, 4 of the 64 routed experts and a 1/16 slice of the shared expert (~10.5 GB
+of the 24 GB core). The UNet patch embed and final layer are split over all 32 ranks by
+GroupNorm group (`unet_parallel`), and the VAE decode by image rows over ranks 0 and 1
+(`vae_parallel: 2`), on the backbone's own cores.
+
+| Stage config | Use |
 | --- | --- |
-| Instance | one `trn2.48xlarge` |
-| Stage config | [`examples/hunyuan_image3/hunyuan_image3_stage.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml) (TP32), [`..._tp16.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_tp16.yaml) (TP16) |
-| Parallelism | tensor/expert parallel only — no CP, no CFG parallelism, no VAE patch parallelism. The UNet patch embed and final layer are split across the TP ranks by GroupNorm group (`unet_parallel`, default on) |
-| Step caching | Cache-DiT DBCache over the denoise loop, `residual_diff_threshold` 0.12 by default (`step_cache`); vllm-omni's TeaCache for this model as an alternative (`tea_cache`, off). See [Step caching](#step-caching) |
-| Resolution | 1024x1024 (the compiled denoise graph is shape-specialised) |
-| Batch | one request at a time (`max_batch_size: 1`) |
-| Quantization | BF16 only |
-| Task | text-to-image; conditioning images (image edit / IT2I) are rejected |
+| [`hunyuan_image3_stage.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage.yaml) | the default: text-to-image and image editing |
+| [`hunyuan_image3_stage_ar.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml) | think / recaption (prompt buckets for the generated text) |
+| [`hunyuan_image3_stage_cfgmixin.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_cfgmixin.yaml) | CFG through `NeuronCFGParallelMixin` |
+| [`hunyuan_image3_stage_tp16.yaml`](../../examples/hunyuan_image3/hunyuan_image3_stage_tp16.yaml) | 16 cores, sequential CFG |
 
-At TP32 each rank owns 1 query head (each of the 8 KV heads is replicated across its 4
-query ranks) and 2 of the 64 routed experts, which puts roughly 5 GB of weights on each
-of the 24 GB logical cores. TP16 doubles both (2 query heads, 4 experts, ~10 GB).
+A request without CFG (`guidance_scale <= 1`) splits its step's tokens over the two
+replicas instead -- context parallelism, with an all-gather of the image K/V in every
+layer; `ring_degree: 2` in place of `cfg_parallel_size: 2` does only that. The plugin's
+ring-attention kernel cannot express this model's denoise attention (GQA, a padded prompt
+prefix, per-key biases), so `enable_ring_attention` is unset or `false`, and `true` is
+refused.
+`model_config.tp_sequence_parallel: true` adds Megatron sequence parallelism inside each
+replica (opt-in: 3% faster without step caching, 6% slower with it).
+`parallel_config.vae_patch_parallel_size: 16` (with `model_config.vae_parallel: 1`)
+switches to vLLM-Omni's tile-parallel VAE, decoded tile by tile on device: as fast as the
+row split, its blended seams 42 dB from it.
 
-## Execution model
+## Usage
+
+Offline:
+
+```bash
+python examples/hunyuan_image3/run.py \
+  --model-path /models/HunyuanImage-3.0-Instruct \
+  --output hunyuan_image3_output.png
+```
+
+`--image PATH` (repeatable) edits or composes from conditioning images; `--bot-task
+think|recaption|think_recaption` with `--stage-config
+examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml` reasons first; `--profile --runs N`
+times warm requests. `--vae-device cpu`, `--step-cache THRESHOLD` and `--tea-cache
+THRESHOLD` (0 disables either) override the stage config for one run.
+
+Online (OpenAI-compatible chat API):
+
+```bash
+bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091
+```
+
+```bash
+curl -s http://localhost:8091/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"a red teapot on a wooden table"}],
+       "extra_body":{"height":1024,"width":1024,"num_inference_steps":50,
+                     "guidance_scale":2.5,"seed":42}}' \
+  | jq -r '.choices[0].message.content[0].image_url.url' \
+  | cut -d',' -f2- | base64 -d > hunyuan_image3_output.png
+```
+
+For think / recaption over HTTP, serve `hunyuan_image3_stage_ar.yaml`: its
+`model_config.bot_task: think` applies to every request, because the diffusion chat
+endpoint of vLLM-Omni 0.24 does not forward a request's `bot_task` (later releases pass it
+through `extra_args`, which takes precedence):
+
+```bash
+bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091 \
+  examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml
+```
+
+**Compile cache.** The first request compiles the prompt prefill, the denoise step and
+the step-cache graphs for its prompt bucket, and the device VAE's stage graphs.
+Point `TORCH_NEURONX_NEFF_CACHE_DIR` at storage that outlives the container so only the
+first run pays it. A cold VAE compiles its stages in series inside that first request,
+about 2 hours at 1024x1024; fill the cache beforehand instead, all stages in parallel
+(stop the server first; `--dtype` must match the stage config's `vae_device_dtype`):
+
+```bash
+# the default stage configs' row split (vae_parallel: 2): their 32-rank world, cores 0-31
+python examples/hunyuan_image3/compile_vae_stages.py --vae-parallel 2
+# the whole decode on one core (vae_device_core / vae_parallel: 1), and the encoder
+python examples/hunyuan_image3/compile_vae_stages.py
+python examples/hunyuan_image3/compile_vae_stages.py --encoder
+```
+
+The cache key includes the source path and line of every traced op, so a cache saved from
+one checkout is reused only by the same files at the same path.
+
+On the Lite runtime the worker pins the CCOM root (`NEURON_RT_ROOT_COMM_ID`) to
+`localhost:61234 + <first core of the stage>`, outside the kernel's ephemeral port range;
+two servers on one node therefore need disjoint `devices`, which they need anyway.
+
+Per-request stage timings are written to
+`$WORKLOAD_OUTPUT_RW/metrics/pipeline_perf_metrics.json` (`/tmp/metrics/...` by default):
+`prefill_seconds`, `denoise_seconds`, `seconds_per_step`, `vae_decode_seconds` and
+`e2e_forward_seconds`.
+
+## Performance
+
+One `trn2.48xlarge`, the recommended configuration (TP16 x CFG2 on 32 cores), 1024x1024,
+50 steps, CFG 2.5, seed 42, the Mars-observatory prompt of the accuracy tests; measured
+2026-10-14 with `run.py --profile --runs 3` (offline) and `serve.sh` +
+`/v1/chat/completions` (online). *First request* is the first generation after the engine
+starts, with the NEFF cache already filled (it loads and warms up its graphs); *warm*
+are the requests after it.
+
+| Request | Stage config | First request | Warm request |
+| --- | --- | ---: | ---: |
+| **Text-to-image, default** (step cache 0.12: 25 of 50 steps computed) | `hunyuan_image3_stage.yaml` | 146.3 s | **12.07-12.13 s** |
+| Text-to-image, step caching off | `--step-cache 0` | 149.4 s | 19.34-19.36 s |
+| Text-to-image over HTTP, default | `serve.sh` | 140.9 s | 12.77-12.80 s |
+| Text-to-image, tile-parallel VAE | `vae_patch_parallel_size: 16` | -- | 12.05-12.08 s |
+| Think, then the image (AR on the backbone) | `hunyuan_image3_stage_ar.yaml`, `--bot-task think` | 205.2 s | 21.07-21.22 s |
+| Image editing, one 1024x1024 image | `--image` | 222.1 s | 17.6-20.3 s |
+| Image editing with think_recaption | `hunyuan_image3_stage_ar.yaml`, `--bot-task think_recaption` | 627.4 s | 32.4-35.4 s |
+
+The served image is byte-identical to the offline one for the same prompt and seed. A
+default request spends ~0.36 s a computed step and ~0.04 s a cached one, and 1.16 s in the
+VAE decode. Image editing varies by up to ~4 s a request with the host-side SigLIP2
+encode of the conditioning image. With a cold NEFF cache the first request also compiles
+its graphs: about 5 minutes for the default text-to-image graphs, more for each
+further prompt bucket, and ~45 minutes for the device VAE unless precompiled (see
+[Usage](#usage)).
+
+**Latency targets.** The tier-3 test (see [Accuracy Evaluation](#accuracy-evaluation))
+holds each case's warm request within 10% (image editing 25%) of the reviewed run's in
+[`test/neuron/goldens/manifest.json`](../../test/neuron/goldens/manifest.json):
+text-to-image 12.2 s, image editing 18.0 s, think 21.2 s, tile-parallel VAE 12.1 s.
+
+## Accuracy Evaluation
+
+**Benchmark:** [GenEval](https://github.com/djghosh13/geneval) scores object-focused
+compositional generation over 553 prompts in six tasks (single object, two objects,
+counting, colors, position, attribute binding) with a Mask2Former object detector and a
+CLIP color classifier. See the [GenEval paper](https://arxiv.org/abs/2310.11513).
+
+**HunyuanImage-3.0-Instruct (BF16), Trn2, recommended configuration**
+
+| Task | Trn2 |
+|------|------|
+| Single object | 98.75% (79 / 80) |
+| Two objects | 97.98% (97 / 99) |
+| Counting | 73.75% (59 / 80) |
+| Colors | 90.43% (85 / 94) |
+| Position | 78.00% (78 / 100) |
+| Attribute binding (color_attr) | 82.00% (82 / 100) |
+| **Overall (mean over tasks)** | **0.868** |
+
+Protocol: the plain prompts (no system prompt or `bot_task`), 1024x1024, 50 steps, CFG
+2.5, the default step cache, **one image per prompt** (seed 0) where GenEval's reference
+protocol uses four -- so each task score carries more sampling noise than a four-sample
+run. Scored with GenEval's own evaluator (Mask2Former Swin-S, CLIP ViT-L-14). No GPU run of
+this checkpoint under the same protocol was available to compare against; results from
+different evaluation configurations are not directly comparable.
+
+**Reproduce:** serve the model, generate the prompt set through the endpoint, then score:
+
+```bash
+bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091 &
+git clone https://github.com/djghosh13/geneval.git
+python examples/hunyuan_image3/geneval_generate.py \
+    --metadata geneval/prompts/evaluation_metadata.jsonl --outdir geneval_out --samples 1
+# in an environment with GenEval's dependencies (mmdet 2.x, open_clip):
+python geneval/evaluation/evaluate_images.py geneval_out --outfile results.jsonl --model-path <detector dir>
+python geneval/evaluation/summary_scores.py results.jsonl
+```
+
+### Hardware accuracy tests
+
+`test/neuron/` checks the port in three tiers, cheapest first, against the **official
+implementation** -- the checkpoint's own `modeling_hunyuan_image_3.py`, run on the host
+(`test/neuron/hy3_official.py`), which shares no code with the plugin or with vLLM-Omni's
+port. Tiers 1 and 2 use `assert_close_three_way` (`vllm_neuron.accuracy.testing`): the
+official code in float32 (baseline) and in the device's dtype (expected), against the
+device (actual); a comparison passes when the device's error distribution matches the
+reference's own same-dtype error (σ-ratio <= 1, or Bhattacharyya coefficient >= 0.99).
+Every test skips off-device (`require_neuron_device`).
+
+| Tier | What runs on device | Reference | Result (2026-10-14) |
+| --- | --- | --- | --- |
+| 1. Components (`test_hunyuan_image3_components_accuracy.py`) | decoder layer 0 of the checkpoint at TP16 (NKI attention, o-proj, MoE): the prompt prefill's K/V and a denoise step; the UNet patch embed and final layer split over 16 ranks | the official layer over the same tokens as one sequence, and the official modules, bf16 | K σ 0.63 (BC 0.983), V σ 0.82 (0.990), denoise step σ 1.000 (0.99999), patch embed σ 0.96 (0.9986), final layer σ 0.84 (0.992) |
+| | the device VAE decoder, float16 with float32 GroupNorm statistics: split by rows over ranks 0/1 as the stage config runs it, and whole on one core | the official VAE decode in float16 with float32 GroupNorm statistics | split σ 1.02 (BC 0.99988), one core σ 0.97 (0.99988) |
+| 2. One denoising step (`test_hunyuan_image3_pipeline_accuracy.py`) | the whole pipeline at the default stage config, step 0 of the Mars prompt, recorded with its templated inputs | the official model -- RoPE, embeddings, all 32 layers, UNet ends, CFG operator and scheduler -- replaying that step (`hy3_official_step.py`), bf16 | CFG-batch prediction σ 0.990 (BC 0.9999), guided prediction σ 0.982 (0.9997), scheduler-updated latents σ 1.11 (0.998) |
+| 3. End to end (`test_hunyuan_image3_e2e_accuracy.py`) | full 50-step generations: text-to-image, image editing, think, the tile-parallel VAE | the reviewed golden outputs in `test/neuron/goldens/`, bound in `manifest.json` to their request, stage config, checkpoint (model and generation config, weight index), token ids, archived initial latents and environment; SSIM >= 0.95, warm latency within 10% (image editing 25%) | all four SSIM 1.0000 (byte-identical), within their latency targets |
+
+Tier 2's request inputs (token ids, image slots, attention mask) come from the trace,
+i.e. from vLLM-Omni's port of the official template; everything computed from them is the
+official code's. The SSIM floor is calibrated on the text-to-image output: a rerun scores
+1.0; sound layout or kernel changes 0.967-0.989; switching the step cache off 0.946; an
+unrelated image 0.18. A missing or altered golden fails tier 3, and so does a run whose
+checkpoint (generation config included), stage config, request or initial latents differ
+from the golden's;
+`HY3_UPDATE_GOLDEN=1` (with `HY3_MODEL_REVISION`) rewrites the goldens and the manifest
+from a reviewed run. These results come from manual runs on one `trn2.48xlarge`; the
+development repository's CI manifest is not part of this checkout.
+
+```bash
+pytest -s test/neuron/test_hunyuan_image3_components_accuracy.py   # ~6 min
+pytest -s test/neuron/test_hunyuan_image3_pipeline_accuracy.py     # ~15 min, ~500 GB of host memory
+pytest -s test/neuron/test_hunyuan_image3_e2e_accuracy.py          # ~25 min
+```
+
+The CPU unit tests under `test/unit/` (`VLLM_NEURON_CPU_MODE=1`) check the port's math
+on tiny random checkpoints -- see [Unit and kernel checks](#unit-and-kernel-checks).
+
+## Known limitations
+
+- **One request at a time.** Concurrent requests run serially (`max_batch_size: 1`).
+- **One shape per compiled graph.** A new resolution, prompt bucket, dtype or parallel
+  layout compiles its own graphs on first use. Only 1024x1024 is validated; an image over
+  1024 on a side decodes its VAE on the host (~29 s), past the NKI convolution's range.
+- **Prompt buckets.** A request takes the smallest of `prefill_len` and `prefill_buckets`
+  that fits its prompt (the think / recaption text picks its own). A prompt longer than the
+  largest bucket is an error, not a truncation: add a bucket (one more compile).
+- **Step caching is on by default and changes the image**: 32 dB PSNR to the uncached
+  one at the default threshold 0.12. `step_cache: false` runs every step.
+- **No ring attention.** The plugin's ring-attention kernel (MHA, no mask or prefix)
+  cannot express the denoise attention; context parallelism all-gathers the image K/V.
+- **Think / recaption** is greedy only, for an explicit image size (no `auto` aspect
+  ratio), serial with the DiT on the same cores. Over HTTP the stage config's
+  `model_config.bot_task` applies to every request (vLLM-Omni 0.24).
+- **Image editing** computes the SigLIP2 and aligner tokens on the host (0.4-4 s of
+  jitter a request); only 1024x1024 conditioning images are measured. Edited images can
+  look over-contrasted; without a GPU reference this is not attributed to the model or to
+  the port.
+- **The split VAE decode** (`vae_parallel: 2`) agrees across its ranks before its
+  collectives, so a rank whose decoder cannot be built sends every rank to the host
+  decode; a failure inside a stage still leaves the other rank waiting in its collective.
+- **No FP8.** BF16 only.
+
+## Implementation notes
+
+How the pipeline maps the model onto Trainium, with the measurements behind each default.
+
+### Execution model
 
 Upstream runs the first denoising step over `prompt + image tokens` and later steps over
 `timestep + image tokens`, reusing a prompt KV cache. Two different shapes means two
@@ -80,15 +355,18 @@ That keeps a 1.1 GB table off every core, and means no uncompiled operation is e
 dispatched to the device under the Lite runtime.
 
 The VAE decode runs on device by default (`model_config.vae_device: neuron`), as seven
-staged float16 graphs with float32 reductions (`vae_device_dtype`), in a worker process on
-a NeuronCore of its own (`vae_device_core`: 32 in the TP32 stage config, 16 in TP16) -- see
-[Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device). That core
-must be outside the stage's `devices` range and otherwise unused. `vae_device: cpu`
+staged float16 graphs with float32 reductions (`vae_device_dtype`) -- see
+[Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device). In the
+default stage configs it is split by image rows over ranks 0 and 1, on the backbone's own
+cores (`vae_parallel: 2`, see [Splitting the decode across ranks](#splitting-the-decode-across-ranks));
+the TP16 config runs it whole in a worker process on a NeuronCore of its own
+(`vae_device_core: 16`), which must be outside the stage's `devices` range and otherwise
+unused. `vae_device: cpu`
 decodes on the host in float32 (`vae_dtype`), which is the reference; the device path
 falls back to it for any image wider or taller than 1024, past the NKI convolution's
 spatial range, and for a request whose device decode fails.
 
-### NKI kernels
+#### NKI kernels
 
 | Kernel | Where | Fallback |
 | --- | --- | --- |
@@ -130,84 +408,26 @@ The denoise step's attention stays in torch on purpose: `attention_cte` takes no
 per-position mask, and that attention is around 1.5% of a layer's FLOPs next to the
 64-expert MoE.
 
-## Usage
+### Performance history
 
-Offline:
+**Defaults of 2026-10-13**: one `trn2.48xlarge`, TP16 x CP2, 1024x1024, 50 steps,
+CFG 2.5, seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm requests,
+`run.py --profile --runs 3`:
 
-```bash
-python examples/hunyuan_image3/run.py \
-  --model-path /models/HunyuanImage-3.0-Instruct \
-  --output hunyuan_image3_output.png
-```
-
-Online (OpenAI-compatible chat API):
-
-```bash
-bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091
-```
-
-```bash
-curl -s http://localhost:8091/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"a red teapot on a wooden table"}],
-       "extra_body":{"height":1024,"width":1024,"num_inference_steps":50,
-                     "guidance_scale":2.5,"seed":42}}' \
-  | jq -r '.choices[0].message.content[0].image_url.url' \
-  | cut -d',' -f2- | base64 -d > hunyuan_image3_output.png
-```
-
-`run.py --vae-device cpu` overrides the stage config's VAE placement for one run;
-`--step-cache THRESHOLD` and `--tea-cache THRESHOLD` (0 disables either) override the
-step caching the same way.
-
-For think / recaption over HTTP, serve `hunyuan_image3_stage_ar.yaml`: its
-`model_config.bot_task: think` applies to every request, because the diffusion chat
-endpoint of vllm-omni 0.24 does not forward a request's `bot_task` (later releases pass it
-through `extra_args`, which takes precedence):
-
-```bash
-bash examples/hunyuan_image3/serve.sh /models/HunyuanImage-3.0-Instruct 8091 \
-  examples/hunyuan_image3/hunyuan_image3_stage_ar.yaml
-```
-
-A cold NEFF cache means the first request at a resolution compiles the VAE's seven stage
-graphs in series inside that request, ~2 hours at 1024x1024. Compile them in parallel
-beforehand instead -- one process per stage on cores 0-6, so stop the server first.
-`--dtype` must match the stage config's `vae_device_dtype` (float16 by default):
-
-```bash
-python examples/hunyuan_image3/compile_vae_stages.py --height 1024 --width 1024
-```
-
-On the Lite runtime the worker pins the CCOM root (`NEURON_RT_ROOT_COMM_ID`) to
-`localhost:61234 + <first core of the stage>`, the range vllm-neuron reserves for it, which
-lies outside the kernel's ephemeral ports (32768-60999). Left to the backend, rank 0 picks
-a free ephemeral port, releases it, and binds it only at the first collective; meanwhile
-the same process opens ~20 listening sockets of its own from that range, and when one
-lands on it the bind fails with `EADDRINUSE` (`Failed to schedule neff execution`, or
-every other rank waiting on the root). That happened on 3 of 9 starts on one node before
-the pin. Two servers on one node therefore need disjoint `devices`, which they need
-anyway.
-
-Per-request stage timings are written to
-`$WORKLOAD_OUTPUT_RW/metrics/pipeline_perf_metrics.json` (`/tmp/metrics/...` by default):
-`prefill_seconds`, `denoise_seconds`, `seconds_per_step`, `vae_decode_seconds` and
-`e2e_forward_seconds`.
-
-## Measured performance
-
-**Current defaults** (2026-10-12): one `trn2.48xlarge`, TP32, 1024x1024, 50 steps, CFG 2.5,
-seed 42, the UNet split across the ranks and Cache-DiT at 0.12. Warm requests:
-
-| Request | Steps run / 50 | Denoise | VAE | Request, `run.py --profile` | Request, `/v1/chat/completions` |
+| Request | Steps run / 50 | Denoise | VAE | Request | TP32 (2026-10-12) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 27.89 s (0.558 / step) | 1.88 s | 29.89 s | -- |
-| **DiT only, default** | 25 | **15.17 s** | 1.85 s | **17.15 s** | 17.79-17.89 s |
-| **`bot_task: think` (`hunyuan_image3_stage_ar.yaml`), default** | 25 | **17.47 s** | 1.86 s | -- | **28.57-28.60 s** (AR 8.4 s, 537 tokens) |
+| DiT only (`hunyuan_image3_stage.yaml`), step caching off | 50 | 17.84-17.90 s (0.357 / step) | 1.14-1.15 s | 19.03-19.11 s | 29.89 s (0.558 / step) |
+| **DiT only, default** | 25 | **10.66-10.68 s** | 1.15-1.17 s | **11.89-11.91 s** | 17.15 s |
+| `bot_task: think` (`hunyuan_image3_stage_ar.yaml`), no CFG, no caching | 50 | 10.43-10.46 s (0.209 / step) | 1.16-1.17 s | 20.4-20.6 s (AR 8.7 s, 15.7 ms / token) | 27.48 s |
 
-The served and offline images for the same prompt and seed are byte-identical. The
-cached image is 32.1 dB PSNR to the uncached one for the DiT-only prompt and 33.8 dB for
-the think one; see [Step caching](#step-caching) for the trade-off.
+The last row is the setting of the GPU comparisons (vLLM-Omni, no CFG, no step cache):
+the DiT stage there is 13.68 s on a g7e and 6.03 s on an H100, against 11.6 s here.
+
+At TP32 the cached image was 32.1 dB PSNR to the uncached one for the DiT-only prompt and
+33.8 dB for the think one, and the served and offline images were byte-identical (served
+over `/v1/chat/completions`: 17.79-17.89 s DiT only, 28.57-28.60 s think); see
+[Step caching](#step-caching) for the trade-off. The served path was not re-measured at
+TP16 x CP2.
 
 The tables below are the history of the earlier defaults. One `trn2.48xlarge`, TP32, 1024x1024, 50 denoising steps, BF16 backbone, CFG batch of 2
 (`guidance_scale` 2.5), `moe_kernel: nki`. Measured 2026-10-11, from
@@ -254,7 +474,7 @@ Two independent benchmarks agree:
   70.68 s, P95 71.01 s, P99 71.04 s, `stage_0_gen_ms` mean 70105. The ~2 s gap is the
   offline runner's per-request Python setup, which the server amortizes.
 
-### Which moe_cte loop
+#### Which moe_cte loop
 
 `examples/hunyuan_image3/bench_denoise_layer.py` times each piece of one decoder layer on
 one core, at one rank's denoise shapes (CFG batch 2 x 4097 tokens, 1 query head, 2 of the
@@ -294,7 +514,7 @@ The pieces sum to 0.35 s of compute per step. The rest of the 0.76 s was first p
 down to the two all-reduces per layer; measuring them and profiling a step showed it was
 the patch embed and final layer instead (next section).
 
-### Where a step goes, and the UNet split
+#### Where a step goes, and the UNet split
 
 `examples/hunyuan_image3/bench_allreduce.py` times the TP32 all-reduce inside a compiled
 graph, under serve.sh's runtime settings: 67 MB takes 1.07 ms (bus bandwidth 122 GB/s)
@@ -325,7 +545,73 @@ from float32 against 5.64e-02 for the replicated path, and the images are 35.2 d
 -- the usual drift of a reordered accumulation over 50 steps. A fused GroupNorm + SiLU
 kernel, as vllm-omni has for CUDA, would save less than 0.5 ms a step after the split.
 
-### Step caching
+#### Context parallelism
+
+With the UNet split, the 32 decoder layers are the step, and a TP32 profile of a no-CFG
+step put 69 ms of its 329 ms in the 64 all-reduces and another ~40 ms in work every TP
+rank repeats on every token (RMSNorm, the float32 router). Two TP16 replicas
+(`tensor_parallel_size: 16` with `ring_degree: 2`, or `cfg_parallel_size: 2`) run the
+backbone at TP16 over ranks 0-15 and 16-31 -- one row of the trn2 chip torus each -- and
+gives each half the tokens: CP pairs `(r, r + 16)` are neighbouring chips at the same
+core offset. In each layer the pair all-gathers its image K/V (one KV head per rank, 1 MB);
+the final layer gathers the tokens back, and the UNet stays split over all 32 ranks.
+
+`bench_allreduce.py --only tpcp` measured the collectives first: a 16.8 MB all-reduce
+within a TP16 group, both groups at once, takes 0.381 ms (64 a step: 24 ms, against 55 ms
+for 33.5 MB at TP32), and the K/V all-gather 0.071 ms (2.3 ms a step). A step went from
+0.338 s to 0.264 s without CFG and from 0.558 s to 0.453 s with it. On identical inputs
+the CFG prediction is 5.26e-02 from float32 at steps 0/25/49 (TP32: 5.25e-02) and
+3.60e-02 from the hybrid-MoE trajectory over 50 steps (TP32: 3.49e-02); the free-running
+image is 34.5 dB from the teacher-forced one, the usual reordering drift.
+
+The AR decode is bound by reading weights, and at TP16 each rank would read twice as many
+(23.8 ms a token against 15.5 ms at TP32). So the two ranks holding a shard split it for
+decode -- half the query heads, local experts, shared-MLP columns and LM-head rows each --
+and all-reduce over all 32 ranks: 15.7 ms a token. Greedy decoding is still exact, but the
+reduction order differs from TP32, so the think text (and with it the image) can differ
+from a TP32 run's.
+
+The token split pads the 4097 step tokens (timestep token + 4096 image tokens) to 2 x 2049;
+the padding key is masked and only CP rank 0's first query is the timestep token. The CP
+gathers run one per batch row: one gather of the whole CFG batch followed by a
+`[cp, batch] -> [batch, cp]` transpose made neuronx-cc fail on the 32-layer CFG graph
+(`NCC_IBTN020 convertAccessPattern: step out of int16 range`) while 2 layers compiled.
+The TP size times the second axis must be the world, and the TP size must still divide
+the 32 query heads, 64 experts and the vocabulary; TP8 x CP4 would not fit (~20 GB of weights a core).
+
+With CFG, `cfg_parallel_size: 2` (the default) uses the two TP16 blocks differently: block 0 runs
+the cond branch and block 1 the uncond one, each at batch 1 over all 4097 tokens, with no
+K/V exchange and each block prefilling only its own branch. Both branches share the
+latents and timestep, so the patch embed stays split over all 32 ranks at batch 1; the
+final layer gathers the two branches' hidden states into the CFG batch and runs over all
+32 ranks, so every rank returns both predictions. Which mode a step graph is in follows
+from its RoPE table's length (a share of the tokens, or all of them). Measured on the
+same code, Mars prompt, CFG 2.5: 0.452 s a step with the token split, 0.442 s with
+CFG parallel; with cache-dit 0.12, 14.14 s and 13.94-14.01 s a request, caching the same
+25 steps. Teacher-forced, the CFG prediction is 5.40e-02 from float32 at steps 0/25/49 and
+3.58e-02 from the hybrid-MoE trajectory over 50 steps. (Timing one TP16 block alone on 16
+cores, 0.496 s a step, is not a stand-in for this: there the UNet split is over 16 ranks.)
+
+#### Denoise attention kernel
+
+`denoise_attention: nki` (the default) runs the denoise step's image queries on nkilib's
+`attention_cte` instead of a torch softmax the compiler fuses, which materialised the
+float32 `[heads, queries, keys]` score matrix and spilled it (59 ms and 7.1 GB a step at
+TP32 without CFG). The kernel's prefix caching fits the step: the right-padded prompt K/V
+is the prefix, `prior_used_len` -- a runtime value, read off the image key bias -- masks
+its padding, and the step's own K/V is the non-causal active part. That needs every image
+token to see the whole prompt and the whole step, which the pipeline checks against the
+generation mask (and refuses the kernel otherwise). The timestep token sees only the
+prompt and itself, so its one row stays in torch with its own bias.
+
+`check_nki_kernels.py --tp-size 16 --only denoise_attention` compares it with the torch
+path on one core: 3.5e-03 relative at 1 x 2049 queries x 4097 keys, 4.1e-03 with 8 of 512
+prompt slots live, 4.2e-03 at 1 x 4097 x 4097 with a 2048 bucket. In the model a step goes
+from 0.442 s to 0.357 s with CFG (CFG parallel) and from 0.264 s to 0.209 s without;
+teacher-forced, the CFG prediction is 5.27e-02 from float32 (torch attention: 5.40e-02).
+`denoise_attention: torch` keeps the fused-softmax path.
+
+#### Step caching
 
 `step_cache` is Cache-DiT's DBCache (`Fn_compute_blocks` 1, `Bn_compute_blocks` 0) on the
 host loop, with vllm-omni's `CacheDiTConfig` names and rules: every step runs the patch
@@ -358,7 +644,7 @@ composition but loses fine structure. TeaCache reuses whole predictions from the
 timestep alone, so at the same speed it moves the image further: at 0.2 the dome's shape,
 the base and the light change. Its coefficients are calibrated on GPU, not on trn2.
 
-### Against the NxDI port of the same model
+#### Against the NxDI port of the same model
 
 An earlier port of HunyuanImage-3.0 to the same `trn2.48xlarge` ran on NxDI with the cores
 split AR16 + DiT16 + VAE1, at the same 1024x1024 / 50 steps / CFG 2.5:
@@ -423,7 +709,7 @@ saving is spent entirely on block bookkeeping.
 That left the host-side VAE decode as the largest remaining term, at 36% of a warm
 request -- which is what the next section removes.
 
-### Moving the VAE decode onto the device
+#### Moving the VAE decode onto the device
 
 The decode was the largest remaining term in a warm request: 29.6 s of float32 on the
 host, 36% of end to end, with no host-side slack left (96 threads, no `OMP_NUM_THREADS`
@@ -583,7 +869,100 @@ seven took 47 min wall at 1024x1024 (1 s for the cached `in+mid`, then
 115 / 891 / 1559 / 2741 / 2263 / 116 s), against ~2 hours in series.
 
 
-## Think / recaption (AR + DiT)
+#### Splitting the decode across ranks
+
+On one core the float16 decode holds 14.7 GiB (NEFF code 4.5, scratchpad 5.75, tensors
+4.5), so it needed a 33rd core: beside a TP16 backbone shard (10.5 GiB) it does not fit.
+`vae_parallel: N` splits it by image rows over ranks 0..N-1. Rank `r` owns rows
+`[r * c, (r + 1) * c)` of every resolution and also computes a halo past them: every
+convolution is 3x3 with zero padding, so a band's rows go stale one row per convolution
+from a cut edge, and walking back from the output each stage's input halo is the next
+stage's halo mapped through its upsample plus one row per convolution it runs -- 14, 14,
+13, 11, 7 and 1 rows for `up0`..`up4` and `out` at their own resolutions, so the large
+stages carry 1-2% extra rows. `in+mid` runs whole on every rank (its attention spans the
+64x64 latent; 0.01 s). GroupNorms below the middle block sum only their rank's owned rows
+and all-reduce them (two `[B, 32]` float32 all-reduces each), so every rank normalises
+with the full image's statistics; in float16 each rank divides its power-of-two scaling
+back out before the all-reduce. The output stage all-gathers the owned rows
+(`vae_device.ShardedDeviceDecoder`, `shard_plan`, `install_sharded_norms`).
+
+`test_hunyuan_image3_vae_sharded.py` checks the split against the whole decode on a small
+decoder with the real structure: 7.7e-07 relative in float32, 3.2e-04 in float16. On
+device, two ways (ranks 0 and 1, on the first chip):
+
+| | One core of its own (`vae_device_core: 32`) | `vae_parallel: 2` |
+| --- | ---: | ---: |
+| VAE decode | 1.87 s | **1.16 s** |
+| Default request (DiT only) | 12.6 s | **11.9 s** |
+| Think, no CFG, no caching | 21.1 s | **20.5 s** |
+| Peak HBM of the busiest core | 14.7 GiB (VAE core) | 20.7 GiB (ranks 0/1: backbone + half the VAE) |
+| Logical cores | 33 | **32** |
+
+The image is 69.7 dB PSNR from the one-core decode (max 1/255, 97.9% of pixels equal). A
+half-height decode alone measured 11.1 GiB -- code 2.36, so the instruction stream halves
+with the area here -- which is how two ways were chosen over four. The first request
+compiles 14 stage NEFFs (7 per rank, in parallel), 36 minutes. Every rank of the split
+must reach the decode: if one fails before its collectives, the others wait in them.
+
+### Image editing (IT2I)
+
+A request with `multi_modal_data: {"image": [...]}` edits or composes from those images
+(`run.py --image PATH`, repeatable). Each conditioning image enters the prompt twice, as
+the official model does (`cond_image_type: vae_vit`): its VAE latents through the patch
+embed at timestep 0 (4096 tokens at 1024x1024) plus a timestep token, and its SigLIP2
+features through the aligner (up to 1024 tokens), inside one block that attends in full
+(`cond_token_attn_type: joint_full`) while the text around it stays causal.
+
+- **Tokens.** Upstream's pre-processing and template build the placeholders. The VAE
+  encode runs on device (`vae_encode_device: neuron`, the default with a device VAE):
+  the whole encoder on one core, rank `vae_encode_rank` (default 2, the first rank the
+  split decode leaves alone), in float16 with float32 GroupNorm reductions
+  (`vae_device.StagedDeviceEncoder`, six stage graphs, `compile_vae_stages.py --encoder`).
+  The same rank then computes the rest on the host -- the patch embed and timestep
+  embedders, SigLIP2 (transformers' `Siglip2VisionModel` on the checkpoint's
+  `vision_model.*`) and the aligner -- and broadcasts the tokens over gloo. A request
+  computes them once for its AR and its DiT (`_cond_image_tokens`).
+  `vae_encode_device: cpu` keeps the float32 host encode on rank 0.
+- **Prefill.** `forward_prefill_bounded` gives each prompt query a key bound read off the
+  generation mask (`_prefill_bounds`): `i + 1` for text, the block's end inside an image
+  block. On device it is `attention_cte`'s sequence-packing bounds
+  (`check_nki_kernels.py --only bounded_attention`: 2.7e-03 against torch at 6144 with a
+  5100-token block). The denoise graphs are unchanged; they see the image tokens as prompt.
+- **Prompt buckets.** `prefill_buckets` (TP32 configs: `[512, 6144, 8192]` and
+  `[2560, 8192]`) -- each request takes the smallest that fits, each bucket compiled on
+  first use. One 1024x1024 image with a short instruction is ~5.1k tokens; with the
+  unified system prompt and think text, ~6.4k for the AR and more for the DiT.
+- **Think / recaption** over the images follows the official `generate_image`: the
+  `en_unified` system prompt unless the request names one, the `gen_text` template with
+  the images for the AR, then the image with its text. The official recipe for editing is
+  `bot_task: think_recaption` (`hunyuan_image3_stage_ar.yaml`).
+
+Checked against the official implementation (`modeling_hunyuan_image_3.py` on the host,
+fp32): the conditioning tokens agree to 2.3e-03 (VAE) and 1.6e-03 (ViT), the 2D RoPE on
+our token layout exactly, and the full-attention block (VAE through ViT tokens, the image's
+timestep token outside it) is the same. One teacher-forced step on device is 2.6e-02 from
+the same pipeline in fp32 on the host -- the bf16 band of text-to-image. A synthetic image
+with "Keep the image exactly the same." comes back at 31.7 dB PSNR. A generated image with
+heavy glare comes back far harsher (10 dB); without a GPU reference that is not yet
+attributed to the model or to this port.
+
+The device encoder (`check_vae_encode.py`, one core): 1.94 s warm against 17.0 s for the
+host float32 encode, posterior moments 4.2e-04 from the host's (1.5e-03 on the mean).
+Its conv_in has three input channels, below the NKI conv's minimum, so `_PaddedConvIn`
+zero-pads them to 96: on the compiler instead, that one conv alone took 13.7 GiB of NEFF
+code and the encoder ran out of memory on its third call; padded, the encoder peaks at
+10.3 GiB (3.2 GiB code, 5.5 GiB shared scratchpad) beside rank 2's backbone shard. It is
+not split over two ranks the way the decode is: a device communicator bootstraps through
+global rank 0, so a group of ranks 2 and 3 waits forever while rank 0 is idle.
+
+Measured, one 1024x1024 image, 50 steps, CFG 2.5, default step cache: a direct edit is
+16.5-20.1 s warm (device encode 1.97 s, the rest of the conditioning tokens 1.2-4.7 s on
+the host, mostly SigLIP2's jitter; denoise 11.2 s at the 6144 bucket with 26 of 50 steps cached; VAE
+decode 1.2 s). With the host encode it was 37 s (conditioning ~16 s). With think_recaption
+and the host encode, 53 s (conditioning ~17 s, AR 6385 + 672 tokens in 11.9 s, denoise
+19.8 s at 8192).
+
+### Think / recaption (AR + DiT)
 
 Upstream runs the text generation as a separate LLM stage on separate devices (AR, then
 DiT, joined by a KV connector). Here it runs on the DiT's own 32 cores and weights, in
@@ -616,7 +995,7 @@ python examples/hunyuan_image3/run.py --bot-task think \
 
 With the current defaults (UNet split, Cache-DiT 0.12) the same request is **28.6 s** over
 `/v1/chat/completions` (AR 8.4 s, denoise 17.5 s, VAE 1.9 s); see
-[Measured performance](#measured-performance). The 2026-10-11 measurement below predates
+[Measured performance](#performance). The 2026-10-11 measurement below predates
 both and the `shard_on_i_hybrid` MoE loop.
 
 Measured 2026-10-11, 1024x1024, 50 steps, CFG 2.5, seed 42, the prompt "A cozy wooden
@@ -641,7 +1020,7 @@ compiles the decode graph and the 2560-token prefill and denoise graphs: 1314 s 
 `test/unit/test_hunyuan_image3_ar_decode.py` checks the decode step against a full causal
 forward of the reference math on CPU, token by token: 4.9e-07 relative, same argmax.
 
-## Validation
+### Unit and kernel checks
 
 `test/unit/test_hunyuan_image3_numerics.py` builds a tiny random checkpoint in the real
 HunyuanImage-3.0 key layout and asserts that the prefill + denoise split reproduces a
@@ -678,21 +1057,22 @@ the same tolerance.
 On device, end to end: a 1024x1024 50-step generation of
 `"A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra
 detailed"` at seed 42 produces a coherent image, through both the offline runner and the
-OpenAI chat endpoint, with byte-identical output. There is **no** image-quality benchmark
-score (no GEBench or equivalent) and no per-step comparison against a GPU run of the same
-checkpoint, so the correctness claim is "reference math reproduced, and the full pipeline
-generates what the prompt asks for" — not quality parity with the reference deployment.
+OpenAI chat endpoint, with byte-identical output. The accuracy against the official implementation and the GenEval score are in
+[Accuracy Evaluation](#accuracy-evaluation).
 
-### Per-step check against float32
+#### Per-step check against float32
 
 Comparing final images says little about a kernel change: 50 steps amplify any
 difference in accumulation order into different fine detail. Instead, the pipeline can
 record every denoise step and replay recorded inputs (`_StepTrace` in
-`pipeline_hunyuan_image3.py`). With `HY3_TRACE_DIR` it saves each step's input latents,
-the raw CFG-batch prediction and the combined prediction. With `HY3_TRACE_FORCE_DIR` it
-feeds a recorded trace's input latents into every step (teacher forcing), so two
-implementations are compared on identical inputs at every step. With `HY3_TRACE_STEPS`
-it runs only the listed steps. `examples/hunyuan_image3/check_denoise_reference.py` runs
+`pipeline_hunyuan_image3.py`). With `HY3_TRACE_DIR` it saves the request's inputs and
+each step's input latents, the raw CFG-batch prediction, the combined prediction and the
+scheduler's updated latents. With `HY3_TRACE_FORCE_DIR` it feeds a recorded trace's input
+latents into every step (teacher forcing), so two implementations are compared on
+identical inputs at every step. `HY3_TRACE_STEPS` records only the listed steps, and
+with forcing runs only those. `compare_step_traces.py --max-rel-l2` fails unless every
+trace has the reference's steps (or `--steps`) with the same timesteps and input latents,
+finite values, and errors within the bound. `examples/hunyuan_image3/check_denoise_reference.py` runs
 the same pipeline class on the host at TP1 in float32, with every kernel on its torch
 fallback. Each step takes ~20 min there; the model loads in ~6 min and needs ~320 GB of
 host memory. `examples/hunyuan_image3/compare_step_traces.py` diffs traces:
@@ -733,48 +1113,6 @@ is simply what bf16 gives. The MoE kernel adds nothing measurable on top of it. 
 combined error is ~2x the branch errors, because the CFG combine
 `uncond + 2.5 (cond - uncond)` amplifies the difference between two close branches. It
 peaks at the last step (t ≈ 9) for every path, float32 aside.
-
-## Known limits
-
-- One resolution per compiled graph. Changing height/width, `prefill_len`, the step
-  layout or the TP degree triggers a cold NEFF build; point
-  `TORCH_NEURONX_NEFF_CACHE_DIR` at storage that outlives the container.
-- A prompt longer than `prefill_len` is an error, not a silent truncation. Raise the
-  bucket (and pay one recompile).
-- No CFG parallelism yet: both CFG branches run in the same batch, so a guided request
-  costs twice the tokens per step. `guidance_scale <= 1.0` runs a single branch.
-- Step caching is on by default and changes the image (32 dB PSNR to the uncached one at
-  0.12). Set `step_cache: false` for every step to run.
-- Over HTTP a request cannot choose `bot_task` with vllm-omni 0.24; the stage config's
-  `model_config.bot_task` applies to all requests.
-- The TP16 stage config carries the same defaults (`unet_parallel`, `step_cache`) but was
-  not re-measured with them on device.
-- No conditioning-image (IT2I / image edit) path, no sequence/context parallelism, no
-  FP8.
-- The AR is greedy only, for an explicit image size (no `auto` aspect-ratio prediction),
-  one request at a time, and serial with the DiT on the same cores rather than pipelined.
-  Its numerics are checked against the reference math, not against an H100 token stream.
-- The device VAE needs one more NeuronCore than the stage's `devices` (`vae_device_core`).
-  Without one, leave `vae_device_core` unset and set `vae_device_dtype: bfloat16`: it then
-  shares the output rank's core, which bfloat16 fits beside and float16 does not.
-- The VAE decode runs on one core, not across ranks (1.8 s at 1024x1024). Images over
-  1024 on either side decode on the host (29 s), because the NKI convolution's spatial
-  range ends there and the device decoder has released the torch weights those sites
-  would need.
-- Each resolution and dtype the device VAE decodes is seven more NEFFs: ~30-47 min to
-  precompile at 1024x1024 with `compile_vae_stages.py`, ~2 hours if the first request
-  compiles them. One resolution in float16 holds 14.7 GiB of the VAE core's 24.
-- The NEFF cache key includes source paths and line numbers (see
-  [Moving the VAE decode onto the device](#moving-the-vae-decode-onto-the-device)), so a
-  cache saved from one checkout is only reused by the same files at the same path.
-- The routed experts take 5.2 ms of a layer's ~16 ms with `shard_on_i_hybrid`, half the
-  dense path; the rest of a layer is attention, norms, the shared expert and the two
-  all-reduces (see [Which moe_cte loop](#which-moe_cte-loop)). The step's matmul
-  utilization is low (6% in the profile) and the tensor engine runs power-throttled about
-  half the time, which is where further per-step gains are.
-- An earlier report that the dense MLP kernel "wedged a NeuronCore" was wrong. It raises
-  a clean compile-time validation error; the node losses that coincided with it have a
-  separate explanation (a standing health-agent flag plus node auto-recovery).
 
 ## Related information
 
