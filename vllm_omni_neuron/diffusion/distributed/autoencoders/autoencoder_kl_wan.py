@@ -619,7 +619,7 @@ class _NeuronDistributedVaeExecutor(DistributedVaeExecutor):
         tid_coord_map = {task.tile_id: task.grid_coord for task in tiletask_list}
 
         assigned = self._balance_tasks(tiletask_list, pp_size)
-        local_tasks = assigned[self.rank] if pp_size <= self.world_size else []
+        local_tasks = assigned[self.rank] if self.rank < pp_size else []
         local_results = [(t.tile_id, operator.exec(t)) for t in local_tasks]
 
         global_padding_shape = self._compute_global_padding_shape(local_results, z.ndim, z.device)
