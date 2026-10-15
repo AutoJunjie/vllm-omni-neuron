@@ -19,6 +19,13 @@ Text-to-video recipe for WAN 2.2 A14B on Trainium.
 Image-to-video recipe for WAN 2.2 A14B on Trainium.
 :::
 
+:::{grid-item-card} HunyuanImage-3.0-Instruct
+:link: hunyuan-image3-instruct
+:link-type: doc
+
+DiT-only text-to-image recipe for HunyuanImage-3.0-Instruct on Trainium2.
+:::
+
 ::::
 
 :::{toctree}
@@ -27,4 +34,5 @@ Image-to-video recipe for WAN 2.2 A14B on Trainium.
 
 WAN 2.2 T2V <wan22-t2v-14b>
 WAN 2.2 I2V <wan22-i2v-14b>
+HunyuanImage-3.0-Instruct <hunyuan-image3-instruct>
 :::

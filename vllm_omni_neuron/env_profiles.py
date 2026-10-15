@@ -98,3 +98,15 @@ class Wan22EnvProfile:
 
 WAN22_T2V = Wan22EnvProfile()
 WAN22_I2V = Wan22EnvProfile()
+
+# HunyuanImage-3.0-Instruct reuses Wan2.2's Neuron runtime settings (LNC=2, -O1 with a
+# 2048-byte HBM scratchpad page, the torch-native backend). The only change is a longer
+# compilation budget: the fused denoise graph covers 32 MoE layers with 4 NKI expert
+# kernels each, so a cold NEFF build takes far longer than Wan's 1800 s.
+HUNYUAN_IMAGE3 = Wan22EnvProfile(
+    VLLM_NEURON_COMPILATION_TIMEOUT="14400",
+    # A hung NeuronCore is expensive on managed clusters: the health check can replace
+    # the whole instance within seconds, taking the NEFF cache and weights with it. Cap
+    # execution so a runaway kernel surfaces as an error instead.
+    extra=EnvWrites(setdefault={"NEURON_RT_EXEC_TIMEOUT": "600"}),
+)

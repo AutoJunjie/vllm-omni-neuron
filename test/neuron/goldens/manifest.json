@@ -1,0 +1,35 @@
+{
+  "cases": {
+    "t2i": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-15T08:58Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_t2i_mars_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "a7a1446cb84c0957922de05edf1cfd145b98e7c643e106d1c15062d4a911984f",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "tree:b8a0901ceaa9882382195577ae5fcd75cf924cdc",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed"
+      ],
+      "sha256": "685365e5a64a3dd4c5f2eecee72e8304a6fd66c68335ff608dc748849c4165b1",
+      "stage_config_sha256": "e7e8e6ad7fb9cdbd5f905e9ca7f1760abeadcbed4935a96048516f83e3937d8d",
+      "warm_seconds": 19.39
+    }
+  }
+}
