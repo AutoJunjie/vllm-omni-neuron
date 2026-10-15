@@ -33,6 +33,8 @@ from vllm_neuron.envs import get_compile_backend_name  # noqa: E402
 
 from vllm_omni_neuron.lite_compat import (  # noqa: E402
     ensure_current_device_index,
+)
+from vllm_omni_neuron.lite_compat import (
     initialize as initialize_lite,
 )
 

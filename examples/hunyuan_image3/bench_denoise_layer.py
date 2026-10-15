@@ -32,7 +32,7 @@ os.environ.setdefault("VLLM_NEURON_DISABLE_GRAPH_CAPTURE_BACKEND", "1")
 os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
 os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "300")
 
-import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
+import vllm_omni_neuron.bootstrap  # noqa: E402, F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
@@ -42,8 +42,8 @@ from vllm_neuron.envs import get_compile_backend_name  # noqa: E402
 
 from vllm_omni_neuron.lite_compat import (  # noqa: E402
     ensure_current_device_index,
-    initialize as initialize_lite,
 )
+from vllm_omni_neuron.lite_compat import initialize as initialize_lite  # noqa: E402
 
 HIDDEN = 4096
 HEAD_DIM = 128

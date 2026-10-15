@@ -22,7 +22,6 @@ from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import (
     _MAX_OUT_CHANNELS,
     _is_eligible,
     _pack_filters,
-    _split_out_channels,
 )
 
 

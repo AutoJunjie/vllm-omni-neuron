@@ -32,6 +32,12 @@ The decode MoE evaluates the rank's local experts densely: for one token the blo
 kernel would pad to a whole 1024-row block. The LM head is vocab-parallel (each rank
 holds ``vocab / tp`` rows) and one all-reduce of the zero-padded shards gives every rank
 the full logits, so every rank takes the same greedy decision with no extra broadcast.
+
+With context parallelism (TP over ``world / cp`` ranks) the ``cp`` ranks that hold the
+same shard split it for decode instead of each repeating it: every one takes ``1 / cp``
+of the shard's query heads, local experts, shared-MLP columns and LM-head rows, and the
+partial sums are all-reduced over the whole world. Decode is bound by reading weights,
+so this keeps a token's bytes per core what they are at TP over every rank.
 """
 
 import json
@@ -44,6 +50,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
+    _hunyuan_o_proj,
     _masked_attend,
     repeat_kv,
     rms_norm,
@@ -55,20 +62,40 @@ _MASK_BIAS = -1.0e30
 AR_BOT_TASKS = ("think", "recaption", "think_recaption")
 
 
-def _moe_dense(mlp, hidden_states: torch.Tensor) -> torch.Tensor:
-    """``NeuronHunyuanMoE.forward`` with the routed experts always on the dense path."""
+def _part(size: int, part: int, parts: int) -> slice:
+    per = size // parts
+    return slice(part * per, (part + 1) * per)
+
+
+def _moe_dense(mlp, hidden_states: torch.Tensor, part: int = 0, parts: int = 1, group=None):
+    """``NeuronHunyuanMoE.forward`` with the routed experts always on the dense path.
+
+    Evaluates only ``part`` of ``parts`` of the rank's experts and shared-MLP columns,
+    and all-reduces over ``group`` (default: the MLP's TP group).
+    """
     bsz, seq, hidden = hidden_states.shape
     tokens = hidden_states.reshape(bsz * seq, hidden)
     weights = mlp._routing_weights(tokens).to(hidden_states.dtype)
-    output = mlp._routed_experts_torch(tokens, weights)
+    experts = _part(mlp.num_local_experts, part, parts)
+    tokens_3d = tokens.unsqueeze(0)
+    output = None
+    for expert in range(experts.start, experts.stop):
+        gate_w = mlp.expert_gate_up_weight[expert, :, 0, :]
+        up_w = mlp.expert_gate_up_weight[expert, :, 1, :]
+        gated = F.silu(torch.matmul(tokens_3d, gate_w)) * torch.matmul(tokens_3d, up_w)
+        expert_out = torch.matmul(gated, mlp.expert_down_weight[expert])
+        scaled = expert_out * weights[:, expert].reshape(1, -1, 1)
+        output = scaled if output is None else output + scaled
+    output = output.squeeze(0)
     if mlp.num_shared_expert:
-        shared_tokens = tokens.unsqueeze(0)
-        gated = F.silu(torch.matmul(shared_tokens, mlp.shared_gate_weight)) * torch.matmul(
-            shared_tokens, mlp.shared_up_weight
-        )
-        output = output + torch.matmul(gated, mlp.shared_down_weight).squeeze(0)
-    if mlp.tp_size > 1:
-        dist.all_reduce(output, group=mlp.tp_group)
+        columns = _part(mlp.shared_intermediate_size, part, parts)
+        gated = F.silu(
+            torch.matmul(tokens_3d, mlp.shared_gate_weight[:, columns])
+        ) * torch.matmul(tokens_3d, mlp.shared_up_weight[:, columns])
+        output = output + torch.matmul(gated, mlp.shared_down_weight[columns]).squeeze(0)
+    group = mlp.tp_group if group is None else group
+    if mlp.tp_size * parts > 1:
+        dist.all_reduce(output, group=group)
     return output.reshape(bsz, seq, hidden)
 
 
@@ -91,15 +118,29 @@ class NeuronHunyuanImage3AR:
         self.tp_size = self.model.tp_size
         self.tp_rank = self.model.tp_rank
         self.tp_group = self.model.tp_group
+        # The CP ranks holding this shard split it; partial sums reduce over the world.
+        self.part, self.parts = self.model.cp_rank, self.model.cp_size
+        self.reduce_group = self.model.world_group if self.parts > 1 else self.tp_group
+        if attn.num_heads % self.parts or self.model.layers[0].mlp.num_local_experts % self.parts:
+            raise ValueError(
+                f"context_parallel={self.parts} must divide the {attn.num_heads} local query "
+                f"heads and {self.model.layers[0].mlp.num_local_experts} local experts"
+            )
         if self.vocab_size % self.tp_size:
             raise ValueError(f"vocab_size {self.vocab_size} is not divisible by tp {self.tp_size}")
         self.vocab_shard = self.vocab_size // self.tp_size
         self.vocab_start = self.tp_rank * self.vocab_shard
+        if self.vocab_shard % self.parts:
+            raise ValueError(f"vocab shard {self.vocab_shard} is not divisible by {self.parts}")
 
         start = time.perf_counter()
         ln_f, lm_head = self._load_head(model_path)
         self.ln_f_weight = ln_f.to(self.dtype).to(self.device)
-        # [H, V/tp], so the step is one matmul with no transpose in the graph.
+        # [H, V/tp], so the step is one matmul with no transpose in the graph; with
+        # context parallelism only this rank's part of the shard.
+        rows = _part(self.vocab_shard, self.part, self.parts)
+        lm_head = lm_head[rows]
+        self.logits_start = self.vocab_start + rows.start
         self.lm_head_t = lm_head.to(self.dtype).t().contiguous().to(self.device)
         logger.info(
             "HunyuanImage3 AR: LM head shard [%d:%d) of %d loaded in %.1fs",
@@ -164,28 +205,57 @@ class NeuronHunyuanImage3AR:
             gen_value = gen_kv[2 * index + 1] * keep + value * onehot
             keys = torch.cat((prompt_kv[2 * index], gen_key), dim=1)
             values = torch.cat((prompt_kv[2 * index + 1], gen_value), dim=1)
-            attended = _masked_attend(
-                query.transpose(1, 2),
-                repeat_kv(keys, attn.num_kv_groups).transpose(1, 2),
-                repeat_kv(values, attn.num_kv_groups).transpose(1, 2),
-                attn.scale,
-                key_bias,
-            )
-            hidden_states = residual + attn._finish(attended)
+            if self.parts == 1:
+                attended = _masked_attend(
+                    query.transpose(1, 2),
+                    repeat_kv(keys, attn.num_kv_groups).transpose(1, 2),
+                    repeat_kv(values, attn.num_kv_groups).transpose(1, 2),
+                    attn.scale,
+                    key_bias,
+                )
+                hidden_states = residual + attn._finish(attended)
+            else:
+                hidden_states = residual + self._attend_part(attn, query, keys, values, key_bias)
             residual = hidden_states
             normed = rms_norm(hidden_states, layer.post_attention_layernorm_weight, layer.eps)
-            hidden_states = residual + _moe_dense(layer.mlp, normed)
+            hidden_states = residual + _moe_dense(
+                layer.mlp, normed, self.part, self.parts, self.reduce_group
+            )
             updated.append(gen_key)
             updated.append(gen_value)
 
         final = rms_norm(hidden_states, self.ln_f_weight, self.eps)
-        local = torch.matmul(final, self.lm_head_t).reshape(1, self.vocab_shard).float()
+        local = torch.matmul(final, self.lm_head_t).reshape(1, -1).float()
         logits = F.pad(
-            local, (self.vocab_start, self.vocab_size - self.vocab_start - self.vocab_shard)
+            local, (self.logits_start, self.vocab_size - self.logits_start - local.shape[1])
         )
-        if self.tp_size > 1:
-            dist.all_reduce(logits, group=self.tp_group)
+        if self.tp_size * self.parts > 1:
+            dist.all_reduce(logits, group=self.reduce_group)
         return (logits, *updated)
+
+    def _attend_part(self, attn, query, keys, values, key_bias):
+        """This rank's part of the query heads through attention and the o-projection.
+
+        Query head ``h`` reads KV head ``h // num_kv_groups``. The partial output is
+        all-reduced over the world, which sums every rank's heads.
+        """
+        heads = _part(attn.num_heads, self.part, self.parts)
+        groups = attn.num_kv_groups
+        kv_heads = slice(heads.start // groups, (heads.stop - 1) // groups + 1)
+        repeat = (heads.stop - heads.start) // (kv_heads.stop - kv_heads.start)
+        attended = _masked_attend(
+            query[:, :, heads].transpose(1, 2),
+            repeat_kv(keys[:, :, kv_heads], repeat).transpose(1, 2),
+            repeat_kv(values[:, :, kv_heads], repeat).transpose(1, 2),
+            attn.scale,
+            key_bias,
+        )
+        rows = _part(attn.q_size, self.part, self.parts)
+        out = _hunyuan_o_proj(
+            attended, attn.o_proj_weight[rows], attn.o_proj_zero_bias, attn.use_kernel
+        )
+        dist.all_reduce(out, group=self.reduce_group)
+        return out
 
     # ---- host loop -------------------------------------------------------------
 
@@ -230,21 +300,64 @@ class NeuronHunyuanImage3AR:
             {self.end_think_id: self.recaption_id} if bot_task == "think_recaption" else {}
         )
 
-        prefill_len = self.pipeline.prefill_len
+        cos, sin = self._rope(len(prompt_ids) + self.max_new_tokens)
+        return self._generate_from(prompt_ids, cos, sin, stop_ids, transitions)
+
+    def generate_conditioned(self, ar_inputs: dict, bot_task: str, cond_tokens) -> dict:
+        """:meth:`generate` for a prompt that carries conditioning images.
+
+        ``ar_inputs`` is the pipeline's ``prepare_model_inputs(mode="gen_text", ...)`` --
+        the official HunyuanImage-3.0 template, with each image's VAE and ViT tokens in
+        the prompt and a 2D RoPE table that runs on past it -- and ``cond_tokens`` the
+        pipeline's ``(positions, values)`` for those tokens. The prompt prefill attends in
+        full inside each image block; the decode is the text decode.
+        """
+        from vllm_omni.diffusion.models.hunyuan_image3.prompt_utils import resolve_stop_token_ids
+
+        if bot_task not in AR_BOT_TASKS:
+            raise ValueError(f"AR bot_task must be one of {AR_BOT_TASKS}, got {bot_task!r}")
+        prompt_ids = ar_inputs["input_ids"][0].tolist()
+        stop_ids = set(
+            resolve_stop_token_ids(task="it2i", bot_task=bot_task, image_size="1024x1024")
+        )
+        stop_ids.add(self.eos_token_id)
+        transitions = (
+            {self.end_think_id: self.recaption_id} if bot_task == "think_recaption" else {}
+        )
+        cos, sin = ar_inputs["custom_pos_emb"]
+        length = len(prompt_ids) + self.max_new_tokens
+        if cos.shape[-2] < length:
+            raise ValueError(f"AR RoPE table covers {cos.shape[-2]} positions, need {length}")
+        cos, sin = cos[:1, :length].float(), sin[:1, :length].float()
         context = len(prompt_ids) - 1
-        if context > prefill_len:
-            raise ValueError(
-                f"AR prompt needs {context} prefill tokens but prefill_len={prefill_len}"
-            )
+        mask = self.pipeline._prepare_attention_mask_for_generation(
+            ar_inputs["input_ids"][:1], self.pipeline.generation_config, model_kwargs=ar_inputs
+        )
+
+        def prefill(embeds, prompt_cos, prompt_sin):
+            bound = self.pipeline._prefill_bounds(mask, context)
+            return self.pipeline._run_prefill_bounded(embeds, prompt_cos, prompt_sin, bound)
+
+        return self._generate_from(prompt_ids, cos, sin, stop_ids, transitions, prefill, cond_tokens)
+
+    def _generate_from(
+        self, prompt_ids, cos, sin, stop_ids, transitions, prefill=None, cond_tokens=None
+    ) -> dict:
+        """The prefill over ``prompt_ids[:-1]`` and the greedy decode loop."""
+        context = len(prompt_ids) - 1
+        # The smallest prompt bucket the AR prompt fits, as the DiT prompt picks its own.
+        prefill_len = self.pipeline.prefill_len = self.pipeline._prefill_bucket(context)
         budget = self.max_new_tokens
-        cos, sin = self._rope(len(prompt_ids) + budget)
 
         start = time.perf_counter()
         prompt_tensor = torch.tensor([prompt_ids], dtype=torch.long)
         embeds, prompt_cos, prompt_sin = self.pipeline._prompt_inputs(
-            prompt_tensor, cos, sin, context
+            prompt_tensor, cos, sin, context, cond_tokens
         )
-        prompt_kv = self.model.run_prefill(embeds, prompt_cos, prompt_sin)
+        if prefill is None:
+            prompt_kv = self.model.run_prefill(embeds, prompt_cos, prompt_sin)
+        else:
+            prompt_kv = prefill(embeds, prompt_cos, prompt_sin)
         cache_shape = (1, budget, self.num_kv_heads, self.head_dim)
         gen_kv = [
             torch.zeros(cache_shape, dtype=self.dtype).to(self.device)

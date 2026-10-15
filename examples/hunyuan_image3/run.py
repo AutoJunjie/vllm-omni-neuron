@@ -27,7 +27,13 @@ torch.nn.functional.gelu = torch.ops.aten.gelu.default
 
 parser = argparse.ArgumentParser(description="HunyuanImage-3.0-Instruct on Neuron")
 parser.add_argument("--dev", action="store_true", help="Dev mode: 2 denoising steps")
-parser.add_argument("--tensor-parallel-size", type=int, default=32)
+parser.add_argument(
+    "--tensor-parallel-size",
+    type=int,
+    default=None,
+    help="The stage's total ranks (TP x CFG x CP), checked against the stage config; "
+    "the thread caps are sized from the stage config either way.",
+)
 parser.add_argument(
     "--model-path",
     type=str,
@@ -63,7 +69,8 @@ parser.add_argument(
     "--prefill-len",
     type=int,
     default=None,
-    help="Override the prompt bucket. A new value triggers a cold prefill compile.",
+    help="Override the base prompt bucket (always one of the buckets, next to the stage "
+    "config's prefill_buckets). A new value triggers a cold prefill compile.",
 )
 parser.add_argument(
     "--moe-kernel",
@@ -107,9 +114,52 @@ parser.add_argument(
     help="vllm-omni TeaCache rel_l1_thresh for the denoise loop (0.2 is its default for this "
     "model); 0 disables it. Default comes from the stage config (off).",
 )
+parser.add_argument(
+    "--vae-parallel",
+    type=int,
+    default=None,
+    help="Split the device VAE decode by rows over this many ranks (2 in the TP32 configs; "
+    "1 = the stage config's vae_device_core, or the output rank's core).",
+)
+parser.add_argument(
+    "--prefill-buckets",
+    default=None,
+    help="Comma-separated prompt buckets, e.g. 512,6144; each request takes the smallest "
+    "that fits (each bucket is its own prefill and denoise compile).",
+)
+parser.add_argument(
+    "--image",
+    action="append",
+    default=None,
+    help="A conditioning image (image editing / IT2I); repeat for several. The prompt is the "
+    "instruction. Needs a prompt bucket that fits the image tokens (prefill_buckets).",
+)
+parser.add_argument(
+    "--num-layers",
+    type=int,
+    default=None,
+    help="Bring-up only: truncate the decoder stack (the image is meaningless).",
+)
 parser.add_argument("--profile", action="store_true", help="Run timed warm generations")
 parser.add_argument("--runs", type=int, default=1, help="Timed runs when --profile is set")
 args = parser.parse_args()
+
+def _stage_config_path() -> str:
+    return args.stage_config or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "hunyuan_image3_stage.yaml"
+    )
+
+
+def _stage_world_size(stage_cfg_path: str) -> int:
+    """The stage's ranks: tensor_parallel_size x cfg_parallel_size x ring_degree."""
+    with open(stage_cfg_path) as handle:
+        parallel = yaml.safe_load(handle)["stage_args"][0]["engine_args"]["parallel_config"]
+    return (
+        int(parallel["tensor_parallel_size"])
+        * int(parallel.get("cfg_parallel_size") or 1)
+        * int(parallel.get("ring_degree") or 1)
+    )
+
 
 # Env must be set before Omni spawns the diffusion workers.
 env_profiles.apply(
@@ -117,7 +167,7 @@ env_profiles.apply(
         env_profiles.HUNYUAN_IMAGE3,
         NEURON_PLATFORM_TARGET_OVERRIDE=args.platform_target,
     ),
-    env_profiles.thread_limits(args.tensor_parallel_size),
+    env_profiles.thread_limits(_stage_world_size(_stage_config_path())),
 )
 
 
@@ -131,15 +181,13 @@ def _load_model_config(stage_cfg_path: str) -> dict:
 
 
 def _check_tensor_parallel_size(stage_cfg_path: str) -> None:
-    """--tensor-parallel-size only sizes the thread caps; the stage config owns the mesh."""
-    stage_args = _load_stage_args(stage_cfg_path)
-    configured = int(stage_args["engine_args"]["parallel_config"]["tensor_parallel_size"])
-    if configured != args.tensor_parallel_size:
+    """--tensor-parallel-size, when given, must be the stage's rank count."""
+    world = _stage_world_size(stage_cfg_path)
+    if args.tensor_parallel_size is not None and args.tensor_parallel_size != world:
         raise SystemExit(
-            f"--tensor-parallel-size={args.tensor_parallel_size} disagrees with "
-            f"tensor_parallel_size={configured} in {stage_cfg_path}. The stage config "
-            "decides the mesh and the visible core range, so pass a matching "
-            "--stage-config (e.g. hunyuan_image3_stage_tp16.yaml for TP16)."
+            f"--tensor-parallel-size={args.tensor_parallel_size} disagrees with the "
+            f"{world} ranks of {stage_cfg_path} (tensor_parallel_size x cfg_parallel_size "
+            "x ring_degree). The stage config decides the mesh and the visible core range."
         )
 
 
@@ -160,9 +208,7 @@ def _write_stage_config_with(stage_cfg_path: str, overrides: dict) -> str:
 
 
 def main() -> None:
-    stage_cfg = args.stage_config or os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "hunyuan_image3_stage.yaml"
-    )
+    stage_cfg = _stage_config_path()
     _check_tensor_parallel_size(stage_cfg)
     overrides = {
         key: value
@@ -170,6 +216,12 @@ def main() -> None:
             ("prefill_len", args.prefill_len),
             ("moe_kernel", args.moe_kernel),
             ("vae_device", args.vae_device),
+            ("num_layers", args.num_layers),
+            ("vae_parallel", args.vae_parallel),
+            (
+                "prefill_buckets",
+                [int(b) for b in args.prefill_buckets.split(",")] if args.prefill_buckets else None,
+            ),
         )
         if value is not None
     }
@@ -224,6 +276,10 @@ def main() -> None:
     params = OmniDiffusionSamplingParams(**sampling_kwargs)
 
     request = {"prompt": args.prompt}
+    if args.image:
+        from PIL import Image
+
+        request["multi_modal_data"] = {"image": [Image.open(path).convert("RGB") for path in args.image]}
     if args.bot_task is not None:
         request["bot_task"] = args.bot_task
     print(f"Generating {args.width}x{args.height}, {steps} steps, bot_task={args.bot_task}")

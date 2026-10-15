@@ -28,7 +28,7 @@ os.environ.setdefault("NEURON_SCRATCHPAD_PAGE_SIZE", "2048")
 # Bound every device execution: an unresponsive core gets a managed node replaced.
 os.environ.setdefault("NEURON_RT_EXEC_TIMEOUT", "120")
 
-import vllm_omni_neuron.bootstrap  # noqa: F401  isort: skip  must precede vllm imports
+import vllm_omni_neuron.bootstrap  # noqa: E402, F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 
@@ -41,8 +41,8 @@ from vllm_neuron.envs import get_compile_backend_name  # noqa: E402
 
 from vllm_omni_neuron.lite_compat import (  # noqa: E402
     ensure_current_device_index,
-    initialize as initialize_lite,
 )
+from vllm_omni_neuron.lite_compat import initialize as initialize_lite  # noqa: E402
 
 HIDDEN = 4096
 NUM_EXPERTS = 64
@@ -132,7 +132,6 @@ def main() -> None:
     _init_single_rank()
 
     from vllm.distributed.parallel_state import get_tp_group
-
     from vllm_omni.platforms import current_omni_platform
 
     device = current_omni_platform.get_torch_device(0)

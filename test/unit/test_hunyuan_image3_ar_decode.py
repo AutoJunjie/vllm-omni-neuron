@@ -84,6 +84,8 @@ def test_decode_steps_match_full_forward() -> None:
     ar.vocab_start = 0
     ar.tp_size = 1
     ar.tp_group = None
+    ar.part, ar.parts, ar.reduce_group = 0, 1, None
+    ar.logits_start = 0
     ar.ln_f_weight = ln_f
     ar.lm_head_t = lm_head.T.contiguous()
 

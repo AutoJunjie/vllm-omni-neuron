@@ -46,11 +46,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import vllm_neuron.functional as NF
 from nkilib.core.attention.attention_cte import attention_cte
+from nkilib.core.mlp.mlp import mlp as nkilib_mlp
 from nkilib.core.moe.moe_cte.moe_cte import (
     ExpertAffinityScaleMode,
     MoECTEImplementation,
 )
-from nkilib.core.mlp.mlp import mlp as nkilib_mlp
 from nkilib.core.output_projection.output_projection_cte import output_projection_cte
 from nkilib.core.utils.common_types import (
     ActFnType,
@@ -70,9 +70,14 @@ from vllm_neuron.utils.weight_loader import (
     set_weight_loader,
     sharding_weight_loader,
 )
+from vllm_omni.diffusion.distributed.parallel_state import get_world_group
 
 from vllm_omni_neuron import envs
 from vllm_omni_neuron.diffusion.distributed.parallel_state import register_replica_groups
+from vllm_omni_neuron.diffusion.models.wan2_2.wan2_2_transformer import (
+    sp_all_gather_seq,
+    sp_reduce_scatter_seq,
+)
 from vllm_omni_neuron.lite_compat import nki_op
 
 logger = logging.getLogger(__name__)
@@ -240,6 +245,81 @@ def _denoise_attend(query, key, value, scale, key_biases):
     image_out = _masked_attend(query, key, value, scale, image_bias)
     timestep_out = _masked_attend(query[:, :, :1], key, value, scale, timestep_bias)
     return torch.cat((timestep_out, image_out[..., 1:]), dim=-1)
+
+
+@nki.jit
+def _hunyuan_prefix_attention_kernel(q, k, v, k_prior, v_prior, prior_used_len):
+    """Non-causal flash attention over ``[prior[:prior_used_len] | k]``, d-major output.
+
+    ``attention_cte``'s prefix caching: the right-padded prompt K/V is the prior, and
+    ``prior_used_len`` -- a runtime value -- masks its padding, so prompts of any length
+    share one NEFF. ``scale=1.0``: the caller pre-scales Q (prefix caching requires it).
+    """
+    return attention_cte(
+        q=q,
+        k=k,
+        v=v,
+        scale=1.0,
+        causal_mask=False,
+        k_prior=k_prior,
+        v_prior=v_prior,
+        prior_used_len=prior_used_len,
+        tp_q=True,
+        tp_k=True,
+        tp_out=True,
+        cache_softmax=False,
+        softmax_dtype=nl.float32,
+        mm_out_dtype=nl.float32,
+    )
+
+
+@nki_op("hunyuan_image3::prefix_attention_cte")
+def _hunyuan_nki_prefix_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_prior: torch.Tensor,
+    v_prior: torch.Tensor,
+    prior_used_len: torch.Tensor,
+) -> torch.Tensor:
+    return _wrap_nki_kernel(_hunyuan_prefix_attention_kernel)(
+        q, k, v, k_prior, v_prior, prior_used_len
+    )
+
+
+def _denoise_attend_kernel(query, key, value, prompt_key, prompt_value, scale, key_biases):
+    """:func:`_denoise_attend` with the image queries on ``attention_cte``.
+
+    Takes ``[B, S, N, D]`` operands before GQA expansion (the kernel interleaves KV heads
+    itself). An image query sees the whole prompt and every image key -- the pipeline
+    checks that against the generation mask -- so the prompt K/V is the kernel's prefix
+    with ``prior_used_len`` = the prompt length, read off the image key bias, and no other
+    mask is needed. The timestep query's row keeps the torch path and its own bias.
+    Returns the d-major ``[B, N, D, S_q]`` the output projection consumes.
+    """
+    timestep_bias, image_bias = key_biases
+    bsz, s_q, heads, dim = query.shape
+    prefill = prompt_key.shape[1]
+    used = (image_bias[0, 0, 0, :prefill] == 0).sum().to(torch.float32).reshape(1)
+
+    def by_head(t):  # [B, S, H, D] -> [B * H, S, D]
+        return t.transpose(1, 2).reshape(-1, t.shape[1], dim).contiguous()
+
+    out = _hunyuan_nki_prefix_attention(
+        by_head(query * scale),
+        by_head(key),
+        by_head(value),
+        by_head(prompt_key),
+        by_head(prompt_value),
+        used,
+    ).reshape(bsz, heads, dim, s_q)
+    groups = heads // key.shape[2]
+    keys = repeat_kv(torch.cat((prompt_key, key), dim=1), groups).transpose(1, 2)
+    values = repeat_kv(torch.cat((prompt_value, value), dim=1), groups).transpose(1, 2)
+    timestep_out = _masked_attend(
+        query[:, :1].transpose(1, 2), keys, values, scale, timestep_bias
+    )
+    return torch.cat((timestep_out, out[..., 1:]), dim=-1)
 
 
 # --- output projection ---------------------------------------------------------
@@ -602,9 +682,24 @@ class NeuronHunyuanAttention(nn.Module):
     upstream ``HunYuanAttention``.
     """
 
-    def __init__(self, config, tp_size: int, tp_group, use_kernel: bool = True):
+    def __init__(
+        self,
+        config,
+        tp_size: int,
+        tp_group,
+        use_kernel: bool = True,
+        cp_size: int = 1,
+        cp_group=None,
+        use_denoise_kernel: bool = False,
+    ):
         super().__init__()
         self.use_kernel = use_kernel
+        # The denoise attention on attention_cte (_denoise_attend_kernel) or in torch.
+        self.use_denoise_kernel = use_denoise_kernel
+        # Context parallelism splits the denoise step's tokens across ``cp_group``; each
+        # rank then attends with its own queries over every rank's keys and values.
+        self.cp_size = cp_size
+        self.cp_group = cp_group
         self.head_dim = int(config.attention_head_dim)
         self.total_num_heads = int(config.num_attention_heads)
         self.total_num_kv_heads = int(
@@ -669,14 +764,15 @@ class NeuronHunyuanAttention(nn.Module):
             key = rms_norm(key, self.key_layernorm_weight, self.eps)
         return query, key, value
 
-    def _finish(self, attention_dmajor):
+    def _finish(self, attention_dmajor, reduce: bool = True):
         out = _hunyuan_o_proj(
             attention_dmajor,
             self.o_proj_weight,
             self.o_proj_zero_bias,
             self.use_kernel,
         )
-        if self.tp_size > 1:
+        # reduce=False: the caller reduce-scatters the partial sums (sequence parallel).
+        if self.tp_size > 1 and reduce:
             dist.all_reduce(out, group=self.tp_group)
         return out
 
@@ -692,8 +788,22 @@ class NeuronHunyuanAttention(nn.Module):
         )
         return self._finish(attn), key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True,
+        reduce=True,
+    ):
         query, key, value = self._project(hidden_states, cos, sin)
+        # split_tokens=False: each CP rank runs a whole CFG branch, so its own keys are all.
+        if self.cp_size > 1 and split_tokens:
+            key, value = _cp_gather_kv(key, value, self.cp_size, self.cp_group)
+        # The key biases cover the step's live keys; the CP split's padding key goes.
+        live = key_biases[1].shape[-1] - prompt_key.shape[1]
+        key, value = key[:, :live], value[:, :live]
+        if self.use_denoise_kernel and can_run_kernel(value):
+            attn = _denoise_attend_kernel(
+                query, key, value, prompt_key, prompt_value, self.scale, key_biases
+            )
+            return self._finish(attn, reduce)
         key = torch.cat((prompt_key, key), dim=1)
         value = torch.cat((prompt_value, value), dim=1)
         attn = _denoise_attend(
@@ -703,7 +813,7 @@ class NeuronHunyuanAttention(nn.Module):
             self.scale,
             key_biases,
         )
-        return self._finish(attn)
+        return self._finish(attn, reduce)
 
 
 class NeuronHunyuanMoE(nn.Module):
@@ -816,19 +926,28 @@ class NeuronHunyuanMoE(nn.Module):
 
     def _routing_weights(self, tokens: torch.Tensor) -> torch.Tensor:
         """Dense ``[T, num_local_experts]`` routing weights for this rank's experts."""
-        logits = torch.matmul(tokens.to(torch.float32), self.gate_weight)
-        probs = torch.softmax(logits, dim=-1)
-        threshold = torch.topk(probs, self.top_k, dim=-1).values[..., -1:]
-        # Threshold form rather than topk + scatter, so the whole block stays in one
-        # static graph. An exact tie at the k-th probability admits more than top_k
-        # experts (and renormalises over them); with a float32 softmax over 64 logits
-        # that is vanishingly rare, and the result is still a convex combination.
-        dense = torch.where(probs >= threshold, probs, torch.zeros_like(probs))
-        if self.norm_topk_prob and self.top_k > 1:
-            dense = dense / dense.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        return self._local_experts(self._routing_dense(tokens))
+
+    def _local_experts(self, dense: torch.Tensor) -> torch.Tensor:
         return dense[
             :, self.local_expert_start : self.local_expert_start + self.num_local_experts
         ]
+
+    def _routing_dense(self, tokens: torch.Tensor) -> torch.Tensor:
+        """``[T, num_experts]`` float32 renormalised top-k weights over every expert."""
+        logits = torch.matmul(tokens.to(torch.float32), self.gate_weight)
+        probs = torch.softmax(logits, dim=-1)
+        chosen = torch.topk(probs, self.top_k, dim=-1).indices
+        # Exactly top_k experts per token, as upstream's topk selects them, even on a tie
+        # at the k-th probability (a ">= k-th value" threshold would admit every tied
+        # expert). The mask is a comparison against the expert ids, not a scatter, so
+        # the block stays one static graph.
+        experts = torch.arange(probs.shape[-1], dtype=torch.int32, device=probs.device)
+        selected = (chosen.to(torch.int32).unsqueeze(-1) == experts).any(dim=-2)
+        dense = torch.where(selected, probs, torch.zeros_like(probs))
+        if self.norm_topk_prob and self.top_k > 1:
+            dense = dense / dense.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        return dense
 
     def _routed_experts_kernel(self, tokens: torch.Tensor, weights: torch.Tensor):
         """Routed experts via the blockwise CTE MoE kernel.
@@ -936,6 +1055,34 @@ class NeuronHunyuanMoE(nn.Module):
             dist.all_reduce(output, group=self.tp_group)
         return output.reshape(bsz, seq, hidden)
 
+    def forward_sp(self, hidden_states: torch.Tensor, real_len: int) -> torch.Tensor:
+        """Sequence parallel: this rank's shard of the tokens in, its shard of the sum out.
+
+        The float32 router runs on the shard only (the work TP would repeat on every
+        rank); its weights over every expert are gathered with the tokens, so each rank
+        still runs its own experts over all of them, and a reduce-scatter in place of the
+        all-reduce returns the summed output to the shards.
+        """
+        bsz, shard, hidden = hidden_states.shape
+        dense = self._routing_dense(hidden_states.reshape(bsz * shard, hidden))
+        tokens = sp_all_gather_seq(hidden_states, self.tp_group, self.tp_size)[:, :real_len]
+        dense = sp_all_gather_seq(dense.reshape(bsz, shard, -1), self.tp_group, self.tp_size)
+        tokens = tokens.reshape(bsz * real_len, hidden)
+        weights = self._local_experts(dense[:, :real_len].reshape(bsz * real_len, -1))
+        weights = weights.to(hidden_states.dtype)
+        if self.use_kernel and can_run_kernel(tokens):
+            output = self._routed_experts_kernel(tokens, weights)
+        else:
+            output = self._routed_experts_torch(tokens, weights)
+        if self.num_shared_expert:
+            shared_tokens = tokens.unsqueeze(0)
+            gated = F.silu(
+                torch.matmul(shared_tokens, self.shared_gate_weight)
+            ) * torch.matmul(shared_tokens, self.shared_up_weight)
+            output = output + torch.matmul(gated, self.shared_down_weight).squeeze(0)
+        output = F.pad(output.reshape(bsz, real_len, hidden), (0, 0, 0, shard * self.tp_size - real_len))
+        return sp_reduce_scatter_seq(output, self.tp_group, self.tp_size)
+
 
 class NeuronHunyuanDecoderLayer(nn.Module):
     """Pre-norm decoder layer: RMSNorm -> attention -> residual -> RMSNorm -> MoE."""
@@ -952,6 +1099,9 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         use_attention_kernel: bool = True,
         block_size: int = 512,
         moe_implementation: str = "shard_on_i_hybrid",
+        cp_size: int = 1,
+        cp_group=None,
+        use_denoise_attention_kernel: bool = False,
     ):
         super().__init__()
         hidden_size = int(config.hidden_size)
@@ -959,7 +1109,13 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         self.input_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.post_attention_layernorm_weight = nn.Parameter(torch.empty(hidden_size))
         self.self_attn = NeuronHunyuanAttention(
-            config, tp_size, tp_group, use_attention_kernel
+            config,
+            tp_size,
+            tp_group,
+            use_attention_kernel,
+            cp_size,
+            cp_group,
+            use_denoise_attention_kernel,
         )
         self.mlp = NeuronHunyuanMoE(
             config,
@@ -983,16 +1139,38 @@ class NeuronHunyuanDecoderLayer(nn.Module):
         hidden_states = residual + self.mlp(normed)
         return hidden_states, key, value
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value):
+    def forward_denoise(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens=True
+    ):
         residual = hidden_states
         normed = rms_norm(hidden_states, self.input_layernorm_weight, self.eps)
         attn_out = self.self_attn.forward_denoise(
-            normed, cos, sin, key_biases, prompt_key, prompt_value
+            normed, cos, sin, key_biases, prompt_key, prompt_value, split_tokens
         )
         hidden_states = residual + attn_out
         residual = hidden_states
         normed = rms_norm(hidden_states, self.post_attention_layernorm_weight, self.eps)
         return residual + self.mlp(normed)
+
+    def forward_denoise_sp(
+        self, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens, real_len
+    ):
+        """Megatron sequence parallel inside the TP group (``tp_sequence_parallel``).
+
+        The residual stream, both RMSNorms and the router hold this rank's ``1 / tp`` of
+        the tokens; the tokens are all-gathered into the attention and the experts, and
+        their TP partial sums reduce-scattered back, in place of the two all-reduces.
+        """
+        attn = self.self_attn
+        normed = rms_norm(hidden_states, self.input_layernorm_weight, self.eps)
+        full = sp_all_gather_seq(normed, attn.tp_group, attn.tp_size)[:, :real_len]
+        out = attn.forward_denoise(
+            full, cos, sin, key_biases, prompt_key, prompt_value, split_tokens, reduce=False
+        )
+        out = F.pad(out, (0, 0, 0, hidden_states.shape[1] * attn.tp_size - real_len))
+        hidden_states = hidden_states + sp_reduce_scatter_seq(out, attn.tp_group, attn.tp_size)
+        normed = rms_norm(hidden_states, self.post_attention_layernorm_weight, self.eps)
+        return hidden_states + self.mlp.forward_sp(normed, real_len)
 
 
 class NeuronHunyuanImage3Transformer(nn.Module):
@@ -1011,17 +1189,45 @@ class NeuronHunyuanImage3Transformer(nn.Module):
         use_nki_attention: bool = True,
         moe_block_size: int = 512,
         moe_implementation: str = "shard_on_i_hybrid",
+        use_denoise_attention_kernel: bool = False,
+        tp_sequence_parallel: bool = False,
     ):
         super().__init__()
         self.config = config
+        # The groups come from the engine's parallel_config (vLLM-Omni's parallel_state,
+        # rebuilt on the Trn2 physical mesh by the worker): the backbone shards over the
+        # TP group; the second axis is either the CFG replicas (cfg_parallel_size: 2) or
+        # the CP shards (ring_degree). With CFG replicas, a request with CFG runs one
+        # branch per replica, and a request without CFG splits its denoise tokens across
+        # them instead (see _second_axis).
+        world = get_world_group()
+        self.world_size = world.world_size
+        self.world_rank = world.rank_in_group
+        self.world_group = world.device_group if self.world_size > 1 else None
         self.tp_size = get_tensor_model_parallel_world_size()
         self.tp_rank = get_tensor_model_parallel_rank()
         self.tp_group = get_tp_group().device_group if self.tp_size > 1 else None
+        self.cp_size, self.cp_rank, self.cp_group, self.cfg_replicas = _second_axis()
+        # Megatron sequence parallel inside TP for the denoise step (model_config
+        # tp_sequence_parallel, as Wan2.2): the residual stream holds 1 / tp of the tokens.
+        self.sp_enabled = bool(tp_sequence_parallel) and self.tp_size > 1
+        if self.tp_size * self.cp_size != self.world_size:
+            raise ValueError(
+                f"HunyuanImage3 runs TP x (CFG or CP) over the whole stage: tensor_parallel_size "
+                f"{self.tp_size} x {self.cp_size} != {self.world_size} ranks"
+            )
+        # Make the groups resolvable to their full replica-group partitions so the
+        # torch-native Neuron backend can legalize the collectives for SPMD compilation
+        # (otherwise: "replica id #N not seen in replica groups"): TP / CP / CFG through
+        # the plugin's registration, and the world group (the UNet split, the AR decode)
+        # here.
+        register_replica_groups(tp_size=self.tp_size, cp_size=1 if self.cfg_replicas else self.cp_size)
+        if self.world_size > 1:
+            from vllm_omni_neuron.lite_compat import register_process_group_replica_groups
 
-        # Make the TP group resolvable to its full replica-group partition so the
-        # torch-native Neuron backend can legalize the all-reduces for SPMD
-        # compilation (otherwise: "replica id #N not seen in replica groups").
-        register_replica_groups(tp_size=self.tp_size, cp_size=1)
+            register_process_group_replica_groups(
+                self.world_group.group_name, [list(range(self.world_size))]
+            )
 
         # The blockwise MoE mapping builder takes the group that shards each expert's
         # intermediate dimension. This backbone is pure expert parallelism — every rank
@@ -1065,6 +1271,9 @@ class NeuronHunyuanImage3Transformer(nn.Module):
                 use_nki_attention,
                 moe_block_size,
                 moe_implementation,
+                self.cp_size,
+                self.cp_group,
+                use_denoise_attention_kernel,
             )
             for layer_idx in range(self.num_layers)
         )
@@ -1086,22 +1295,43 @@ class NeuronHunyuanImage3Transformer(nn.Module):
             kv.append(value)
         return tuple(kv)
 
-    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv):
-        """One denoising step over ``[timestep token] + image tokens``."""
+    def forward_denoise(self, hidden_states, cos, sin, key_biases, *prompt_kv, split_tokens=True):
+        """One denoising step over ``[timestep token] + image tokens``.
+
+        With context parallelism, ``split_tokens`` says whether this rank holds a share
+        of the tokens (the CP ranks exchange K/V) or a whole CFG branch of its own.
+        """
         if len(prompt_kv) != 2 * self.num_layers:
             raise ValueError(
                 f"expected {2 * self.num_layers} prompt K/V tensors, got {len(prompt_kv)}"
             )
         for layer_idx, layer in enumerate(self.layers):
-            hidden_states = layer.forward_denoise(
-                hidden_states,
-                cos,
-                sin,
-                key_biases,
-                prompt_kv[2 * layer_idx],
-                prompt_kv[2 * layer_idx + 1],
+            hidden_states = self.denoise_layer(
+                layer, hidden_states, cos, sin, key_biases,
+                prompt_kv[2 * layer_idx], prompt_kv[2 * layer_idx + 1], split_tokens,
             )
         return hidden_states
+
+    def denoise_layer(self, layer, hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens):
+        """One decoder layer of the denoise step; ``hidden_states`` is a shard with SP."""
+        if self.sp_enabled:
+            return layer.forward_denoise_sp(
+                hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens,
+                cos.shape[1],
+            )
+        return layer.forward_denoise(
+            hidden_states, cos, sin, key_biases, prompt_key, prompt_value, split_tokens
+        )
+
+    def sp_shard(self, tokens: torch.Tensor) -> torch.Tensor:
+        """This TP rank's sequence shard of ``[B, S, ...]`` (zero-padded to tp equal parts)."""
+        return cp_local_tokens(tokens, self.tp_size, self.tp_rank) if self.sp_enabled else tokens
+
+    def sp_unshard(self, tokens: torch.Tensor, real_len: int) -> torch.Tensor:
+        """Every TP rank's shard back into ``[B, real_len, ...]``."""
+        if not self.sp_enabled:
+            return tokens
+        return sp_all_gather_seq(tokens, self.tp_group, self.tp_size)[:, :real_len]
 
     def forward(self, *args, **kwargs):  # pragma: no cover - explicit entry points only
         raise RuntimeError(
@@ -1320,6 +1550,192 @@ def nki_attention_enabled(model_config: dict | None) -> bool:
     return choice == "nki"
 
 
+def denoise_attention_kernel_enabled(model_config: dict | None) -> bool:
+    """Resolve ``denoise_attention`` (``nki`` default): the denoise step's attention on
+    ``attention_cte`` with the prompt as its prefix, or the fused torch softmax."""
+    choice = str((model_config or {}).get("denoise_attention", "nki")).lower()
+    if choice not in ("nki", "torch"):
+        raise ValueError(
+            f"model_config.denoise_attention must be 'nki' or 'torch', got {choice!r}"
+        )
+    return choice == "nki"
+
+
 def default_prefill_len() -> int:
     """Default prompt bucket, overridable with ``model_config.prefill_len``."""
     return int(os.environ.get("VLLM_NEURON_HUNYUAN_PREFILL_LEN", "512"))
+
+
+# --- context parallelism -------------------------------------------------------------
+
+
+def _second_axis():
+    """``(size, rank, device group, is_cfg)`` of the axis beside TP, from vLLM-Omni's groups.
+
+    ``cfg_parallel_size: 2`` gives two TP replicas, one CFG branch each; ``ring_degree``
+    gives CP shards of the denoise tokens. CFG pairs ``(r, r + tp)`` and CP shards are
+    built by the engine (on the Trn2 physical mesh where it applies), so the in-graph
+    collectives here run on the groups the plugin registers.
+    """
+    from vllm_omni.diffusion.distributed.parallel_state import (
+        get_cfg_group,
+        get_classifier_free_guidance_world_size,
+        get_sequence_parallel_world_size,
+        get_sp_group,
+    )
+
+    try:
+        cfg = get_classifier_free_guidance_world_size()
+    except AssertionError:
+        cfg = 1
+    try:
+        sp = get_sequence_parallel_world_size()
+    except AssertionError:
+        sp = 1
+    if cfg > 1 and sp > 1:
+        raise ValueError("HunyuanImage3: set cfg_parallel_size or ring_degree, not both")
+    if cfg > 2:
+        raise ValueError(f"cfg_parallel_size must be 1 or 2, got {cfg}")
+    if cfg == 2:
+        group = get_cfg_group()
+        return 2, group.rank_in_group, group.device_group, True
+    if sp > 1:
+        group = get_sp_group()
+        return sp, group.rank_in_group, group.device_group, False
+    return 1, 0, None, False
+
+
+def cp_local_tokens(tokens: torch.Tensor, cp_size: int, cp_rank: int) -> torch.Tensor:
+    """This CP rank's share of ``[B, S, ...]``: zero-padded to ``cp`` equal slices first.
+
+    The padding rows are never read back (``cp_gather_tokens`` callers slice them off)
+    and their keys are masked by the key biases.
+    """
+    local = -(-tokens.shape[1] // cp_size)
+    pad = [0, 0] * (tokens.dim() - 2) + [0, local * cp_size - tokens.shape[1]]
+    return F.pad(tokens, pad)[:, cp_rank * local : (cp_rank + 1) * local]
+
+
+def cp_gather_tokens(tokens: torch.Tensor, cp_size: int, cp_group) -> torch.Tensor:
+    """``[B, S, ...]`` per CP rank -> ``[B, cp * S, ...]``, ranks in token order.
+
+    One all-gather per batch row: the gathered rows are then already in token order,
+    with no ``[cp, B] -> [B, cp]`` transpose of the whole result.
+    """
+    rows = []
+    for row in tokens.split(1, dim=0):
+        row = row.contiguous()
+        out = row.new_empty((cp_size, *row.shape[1:]))
+        dist.all_gather_into_tensor(out, row, group=cp_group)
+        rows.append(out.reshape(1, cp_size * row.shape[1], *row.shape[2:]))
+    return rows[0] if len(rows) == 1 else torch.cat(rows, dim=0)
+
+
+def _cp_gather_kv(key: torch.Tensor, value: torch.Tensor, cp_size: int, cp_group):
+    """Every CP rank's image keys and values: ``[B, cp * S, N, D]`` each."""
+    both = cp_gather_tokens(torch.cat((key, value), dim=0), cp_size, cp_group)
+    return both.chunk(2, dim=0)
+
+
+def cp_gather_batch(tokens: torch.Tensor, cp_size: int, cp_group) -> torch.Tensor:
+    """``[B, S, ...]`` per CP rank -> ``[cp * B, S, ...]``: each rank's rows, rank-major."""
+    tokens = tokens.contiguous()
+    out = tokens.new_empty((cp_size * tokens.shape[0], *tokens.shape[1:]))
+    dist.all_gather_into_tensor(out, tokens, group=cp_group)
+    return out
+
+
+# --- prompt prefill with full-attention blocks (conditioning images) --------------------
+#
+# Below everything traced so far, so adding it moves no line of the cached graphs.
+
+
+@nki.jit
+def _hunyuan_bounded_attention_kernel(q, k, v, bound_min, bound_max):
+    """Attention where query ``i`` sees keys ``[bound_min[i], bound_max[i])``, d-major out.
+
+    ``attention_cte``'s sequence-packing bounds, non-causal: the caller encodes causal
+    text and full-attention image blocks in ``bound_max``. ``scale=1.0``: Q is pre-scaled.
+    """
+    return attention_cte(
+        q=q,
+        k=k,
+        v=v,
+        scale=1.0,
+        causal_mask=False,
+        bound_min=bound_min,
+        bound_max=bound_max,
+        tp_q=True,
+        tp_k=True,
+        tp_out=True,
+        cache_softmax=False,
+        softmax_dtype=nl.float32,
+        mm_out_dtype=nl.float32,
+    )
+
+
+@nki_op("hunyuan_image3::bounded_attention_cte")
+def _hunyuan_nki_bounded_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    bound_min: torch.Tensor,
+    bound_max: torch.Tensor,
+) -> torch.Tensor:
+    return _wrap_nki_kernel(_hunyuan_bounded_attention_kernel)(q, k, v, bound_min, bound_max)
+
+
+def _bounded_attend(query, key, value, scale, bound, use_kernel: bool = True):
+    """``[B, N, S, D]`` attention with query ``i`` over keys ``[0, bound[i])``; d-major out.
+
+    ``bound`` is a ``[S]`` float32 vector: ``i + 1`` for a causal token, the end of its
+    block for a token in a full-attention block (the conditioning images' ``joint_full``).
+    """
+    scaled_query = query * scale
+    b, n, s_q, d = scaled_query.shape
+    if use_kernel and _can_use_causal_attention_kernel(scaled_query, key, value):
+        upper = bound.reshape(1, s_q, 1).expand(b * n, s_q, 1).contiguous()
+        out = _hunyuan_nki_bounded_attention(
+            scaled_query.reshape(b * n, s_q, d).contiguous(),
+            key.reshape(b * n, key.shape[2], d).contiguous(),
+            value.reshape(b * n, value.shape[2], d).contiguous(),
+            torch.zeros_like(upper),
+            upper,
+        )
+        return out.reshape(b, n, d, s_q)
+    visible = torch.arange(key.shape[2], device=query.device).reshape(1, -1) < bound.reshape(-1, 1)
+    scores = torch.matmul(scaled_query.float(), key.float().transpose(-2, -1))
+    scores = scores.masked_fill(~visible, float("-inf"))
+    attn = torch.softmax(scores, dim=-1)
+    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1).contiguous()
+
+
+def forward_prefill_bounded(model, inputs_embeds, cos, sin, bound):
+    """``forward_prefill`` with each prompt query seeing keys ``[0, bound[i])``.
+
+    For prompts that carry conditioning images, whose tokens attend to each other in
+    full while the text around them stays causal. Returns the same ``2 * num_layers``
+    prompt K/V, layer-major, so the denoise graphs consume it unchanged.
+    """
+    hidden_states = inputs_embeds
+    kv: list[torch.Tensor] = []
+    for layer in model.layers:
+        attn = layer.self_attn
+        residual = hidden_states
+        normed = rms_norm(hidden_states, layer.input_layernorm_weight, layer.eps)
+        query, key, value = attn._project(normed, cos, sin)
+        attended = _bounded_attend(
+            query.transpose(1, 2),
+            repeat_kv(key, attn.num_kv_groups).transpose(1, 2),
+            repeat_kv(value, attn.num_kv_groups).transpose(1, 2),
+            attn.scale,
+            bound,
+            attn.use_kernel,
+        )
+        hidden_states = residual + attn._finish(attended)
+        residual = hidden_states
+        normed = rms_norm(hidden_states, layer.post_attention_layernorm_weight, layer.eps)
+        hidden_states = residual + layer.mlp(normed)
+        kv.append(key)
+        kv.append(value)
+    return tuple(kv)

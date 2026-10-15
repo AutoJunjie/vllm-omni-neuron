@@ -55,11 +55,11 @@ os.environ["MKL_NUM_THREADS"] = "1"
 import vllm_omni_neuron.bootstrap  # noqa: E402, F401  isort: skip  must precede vllm imports
 import torch  # noqa: E402
 import torch.distributed as dist  # noqa: E402
-
 from vllm_neuron.envs import get_compile_backend_name  # noqa: E402
 
 HIDDEN = 4096
-MODES = ("allreduce", "overlap")
+MODES = ("allreduce", "overlap", "tpcp")
+DEFAULT_MODES = ("allreduce", "overlap")
 HOST_GROUP = None
 
 parser = argparse.ArgumentParser(description="TP all-reduce cost inside a compiled graph")
@@ -91,6 +91,15 @@ parser.add_argument(
     "to its in-process compiler through NEURON_CC_FLAGS, and ignores the variable "
     "itself once compiler_args is set, so flags must go here.",
 )
+parser.add_argument("--sub-tp", type=int, default=16, help="tpcp: TP group size; CP = world / sub-tp.")
+parser.add_argument(
+    "--tpcp-tokens",
+    type=int,
+    nargs="+",
+    default=[2049, 4097],
+    help="tpcp: rows of the all-reduced activation; 2049 = half the 4097 image tokens (CP2).",
+)
+parser.add_argument("--kv-tokens", type=int, default=2049, help="tpcp: rows of each rank's K and V.")
 parser.add_argument("--only", nargs="*", default=None, choices=MODES)
 args = parser.parse_args()
 
@@ -193,6 +202,15 @@ def _time(name, fn, *inputs):
     return best, median
 
 
+def _slope(results):
+    """Least-squares per-collective time over chain lengths, and the fixed part."""
+    ks = sorted(results)
+    mean_k = sum(ks) / len(ks)
+    mean_t = sum(results[k] for k in ks) / len(ks)
+    slope = sum((k - mean_k) * (results[k] - mean_t) for k in ks) / sum((k - mean_k) ** 2 for k in ks)
+    return slope, mean_t - slope * mean_k
+
+
 def main() -> None:
     global HOST_GROUP
     device, group, HOST_GROUP, world = _init_worker()
@@ -205,7 +223,7 @@ def main() -> None:
 
     if rank == 0:
         print(f"TP{world} all-reduce over {group}; device {device}", flush=True)
-    want = set(args.only or MODES)
+    want = set(args.only or DEFAULT_MODES)
     bias = dev(1, HIDDEN)
 
     def ar_chain(k):
@@ -297,6 +315,76 @@ def main() -> None:
                 f"{b * 1e3:.2f} ms, A+B in one graph {ab * 1e3:.2f} ms; "
                 f"sum {(a + b) * 1e3:.2f}, max {max(a, b) * 1e3:.2f}; "
                 f"{hidden_fraction:.0%} of the shorter branch hidden",
+                flush=True,
+            )
+
+
+    if "tpcp" in want:
+        # TP x CP on the same ranks: contiguous TP blocks (block b = chips 4b..4b+3, one
+        # torus row at TP16), CP across the blocks at the same position (vertically
+        # adjacent chips). Every rank builds every group, then registers the partition
+        # under its own group's name so the compiled collectives legalize.
+        from vllm_omni_neuron.lite_compat import register_process_group_replica_groups
+
+        sub = args.sub_tp
+        tp_parts = [list(range(b, b + sub)) for b in range(0, world, sub)]
+        cp_parts = [list(range(i, world, sub)) for i in range(sub)]
+        tp_pg = cp_pg = None
+        for part in tp_parts:
+            pg = dist.new_group(part)
+            tp_pg = pg if rank in part else tp_pg
+        for part in cp_parts:
+            pg = dist.new_group(part)
+            cp_pg = pg if rank in part else cp_pg
+        register_process_group_replica_groups(tp_pg.group_name, tp_parts)
+        register_process_group_replica_groups(cp_pg.group_name, cp_parts)
+        cp = len(cp_parts[0])
+        if rank == 0:
+            print(f"[tpcp] TP{sub} groups {[p[0] for p in tp_parts]}+.., CP{cp} groups e.g. {cp_parts[0]}", flush=True)
+
+        def tp_chain(k):
+            def fn(x, b):
+                y = x + b
+                for _ in range(k):
+                    dist.all_reduce(y, group=tp_pg)
+                return y.float().sum()
+
+            return fn
+
+        for tokens in args.tpcp_tokens:
+            x = dev(tokens, HIDDEN, scale=0.0)
+            megabytes = tokens * HIDDEN * 2 / 1e6
+            results = {k: _time(f"tp{sub}_ar_{tokens}x{k}", tp_chain(k), x, bias)[0] for k in args.chain}
+            if rank == 0:
+                slope, fixed = _slope(results)
+                busbw = megabytes / 1e3 / slope * 2 * (sub - 1) / sub
+                print(
+                    f"[tpcp] TP{sub} all-reduce {tokens} x {HIDDEN} = {megabytes:.1f} MB: "
+                    f"{slope * 1e3:.3f} ms (fixed {fixed * 1e3:.3f} ms), busbw {busbw:.1f} GB/s, x64 = {slope * 64:.3f} s",
+                    flush=True,
+                )
+            del x
+
+        def cp_chain(k):
+            def fn(kv):
+                y = kv
+                for _ in range(k):
+                    out = y.new_empty((cp * y.shape[0], *y.shape[1:]))
+                    dist.all_gather_into_tensor(out, y.contiguous(), group=cp_pg)
+                    # Keep the shape and depend on every rank's slice.
+                    y = out.reshape(cp, *y.shape).sum(0) * (1.0 / cp)
+                return y.float().sum()
+
+            return fn
+
+        kv = dev(2, args.kv_tokens, 128)  # one KV head's K and V for this rank's tokens
+        kv_mb = kv.numel() * 2 / 1e6
+        results = {k: _time(f"cp{cp}_ag_kv{args.kv_tokens}x{k}", cp_chain(k), kv)[0] for k in args.chain}
+        if rank == 0:
+            slope, fixed = _slope(results)
+            print(
+                f"[tpcp] CP{cp} all-gather of K+V {kv_mb:.2f} MB per rank: {slope * 1e3:.3f} ms "
+                f"(fixed {fixed * 1e3:.3f} ms), x32 layers = {slope * 32 * 1e3:.1f} ms",
                 flush=True,
             )
 
