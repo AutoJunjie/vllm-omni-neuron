@@ -23,7 +23,7 @@ Image-to-video recipe for WAN 2.2 A14B on Trainium.
 :link: hunyuan-image3-instruct
 :link-type: doc
 
-DiT-only text-to-image recipe for HunyuanImage-3.0-Instruct on Trainium2.
+Text-to-image, think / recaption and image editing with HunyuanImage-3.0-Instruct on Trainium2.
 :::
 
 ::::

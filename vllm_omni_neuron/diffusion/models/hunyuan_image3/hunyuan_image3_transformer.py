@@ -1365,3 +1365,99 @@ def cfg_gather_batch(tokens: torch.Tensor, cfg_size: int, cfg_group) -> torch.Te
     out = tokens.new_empty((cfg_size * tokens.shape[0], *tokens.shape[1:]))
     dist.all_gather_into_tensor(out, tokens, group=cfg_group)
     return out
+
+
+# --- prompt prefill with full-attention blocks (conditioning images) --------------------
+#
+# Below everything traced so far, so adding it moves no line of the cached graphs.
+
+
+@nki.jit
+def _hunyuan_bounded_attention_kernel(q, k, v, bound_min, bound_max):
+    """Attention where query ``i`` sees keys ``[bound_min[i], bound_max[i])``, d-major out.
+
+    ``attention_cte``'s sequence-packing bounds, non-causal: the caller encodes causal
+    text and full-attention image blocks in ``bound_max``. ``scale=1.0``: Q is pre-scaled.
+    """
+    return attention_cte(
+        q=q,
+        k=k,
+        v=v,
+        scale=1.0,
+        causal_mask=False,
+        bound_min=bound_min,
+        bound_max=bound_max,
+        tp_q=True,
+        tp_k=True,
+        tp_out=True,
+        cache_softmax=False,
+        softmax_dtype=nl.float32,
+        mm_out_dtype=nl.float32,
+    )
+
+
+@nki_op("hunyuan_image3::bounded_attention_cte")
+def _hunyuan_nki_bounded_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    bound_min: torch.Tensor,
+    bound_max: torch.Tensor,
+) -> torch.Tensor:
+    return _wrap_nki_kernel(_hunyuan_bounded_attention_kernel)(q, k, v, bound_min, bound_max)
+
+
+def _bounded_attend(query, key, value, scale, bound, use_kernel: bool = True):
+    """``[B, N, S, D]`` attention with query ``i`` over keys ``[0, bound[i])``; d-major out.
+
+    ``bound`` is a ``[S]`` float32 vector: ``i + 1`` for a causal token, the end of its
+    block for a token in a full-attention block (the conditioning images' ``joint_full``).
+    """
+    scaled_query = query * scale
+    b, n, s_q, d = scaled_query.shape
+    if use_kernel and _can_use_causal_attention_kernel(scaled_query, key, value):
+        upper = bound.reshape(1, s_q, 1).expand(b * n, s_q, 1).contiguous()
+        out = _hunyuan_nki_bounded_attention(
+            scaled_query.reshape(b * n, s_q, d).contiguous(),
+            key.reshape(b * n, key.shape[2], d).contiguous(),
+            value.reshape(b * n, value.shape[2], d).contiguous(),
+            torch.zeros_like(upper),
+            upper,
+        )
+        return out.reshape(b, n, d, s_q)
+    visible = torch.arange(key.shape[2], device=query.device).reshape(1, -1) < bound.reshape(-1, 1)
+    scores = torch.matmul(scaled_query.float(), key.float().transpose(-2, -1))
+    scores = scores.masked_fill(~visible, float("-inf"))
+    attn = torch.softmax(scores, dim=-1)
+    return torch.matmul(attn, value.float()).to(query.dtype).transpose(-2, -1).contiguous()
+
+
+def forward_prefill_bounded(model, inputs_embeds, cos, sin, bound):
+    """``forward_prefill`` with each prompt query seeing keys ``[0, bound[i])``.
+
+    For prompts that carry conditioning images, whose tokens attend to each other in
+    full while the text around them stays causal. Returns the same ``2 * num_layers``
+    prompt K/V, layer-major, so the denoise graphs consume it unchanged.
+    """
+    hidden_states = inputs_embeds
+    kv: list[torch.Tensor] = []
+    for layer in model.layers:
+        attn = layer.self_attn
+        residual = hidden_states
+        normed = rms_norm(hidden_states, layer.input_layernorm_weight, layer.eps)
+        query, key, value = attn._project(normed, cos, sin)
+        attended = _bounded_attend(
+            query.transpose(1, 2),
+            repeat_kv(key, attn.num_kv_groups).transpose(1, 2),
+            repeat_kv(value, attn.num_kv_groups).transpose(1, 2),
+            attn.scale,
+            bound,
+            attn.use_kernel,
+        )
+        hidden_states = residual + attn._finish(attended)
+        residual = hidden_states
+        normed = rms_norm(hidden_states, layer.post_attention_layernorm_weight, layer.eps)
+        hidden_states = residual + layer.mlp(normed)
+        kv.append(key)
+        kv.append(value)
+    return tuple(kv)

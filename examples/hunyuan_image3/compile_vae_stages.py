@@ -44,6 +44,11 @@ parser.add_argument(
 )
 parser.add_argument("--stage", default=None, help="Compile only this stage, on this process")
 parser.add_argument(
+    "--encoder",
+    action="store_true",
+    help="The encoder's stages (StagedDeviceEncoder) instead of the decoder's.",
+)
+parser.add_argument(
     "--first-core",
     type=int,
     default=0,
@@ -63,6 +68,7 @@ parser.add_argument("--rank", type=int, default=None, help=argparse.SUPPRESS)
 args = parser.parse_args()
 
 STAGES = ["in+mid", "up0", "up1", "up2", "up3", "up4", "out"]
+ENCODER_STAGES = ["down0", "down1", "down2", "down3", "down4", "mid+out"]
 
 
 def _spawn(children) -> int:
@@ -80,9 +86,10 @@ def _spawn(children) -> int:
 
 def _launch_all() -> int:
     """One child per stage, each pinned to its own core."""
+    stages = ENCODER_STAGES if args.encoder else STAGES
     return _spawn(
-        (name, args.first_core + offset, ["--stage", name], {})
-        for offset, name in enumerate(STAGES)
+        (name, args.first_core + offset, ["--stage", name] + (["--encoder"] if args.encoder else []), {})
+        for offset, name in enumerate(stages)
     )
 
 
@@ -101,13 +108,14 @@ def _launch_sharded() -> int:
 
 
 if args.vae_parallel > 1 and args.rank is None:
-    if args.stage:
-        raise SystemExit("--vae-parallel compiles every decoder stage; drop --stage")
+    if args.encoder or args.stage:
+        raise SystemExit("--vae-parallel compiles every decoder stage; drop --encoder / --stage")
     sys.exit(_launch_sharded())
 if args.stage is None and args.rank is None:
     sys.exit(_launch_all())
-if args.rank is None and args.stage not in STAGES:
-    raise SystemExit(f"--stage must be one of {STAGES}")
+_valid = ENCODER_STAGES if args.encoder else STAGES
+if args.rank is None and args.stage not in _valid:
+    raise SystemExit(f"--stage must be one of {_valid}")
 
 os.environ.setdefault("NEURON_LOGICAL_NC_CONFIG", "2")
 os.environ.setdefault("VLLM_NEURON_BACKEND", "neuron_native")
@@ -126,9 +134,11 @@ from vllm.transformers_utils.config import get_config  # noqa: E402
 from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (  # noqa: E402
     ShardedDeviceDecoder,
     StagedDeviceDecoder,
+    StagedDeviceEncoder,
     band,
     bootstrap_device_collectives,
     decoder_stages,
+    encoder_stages,
     shard_plan,
     vae_row_groups,
 )
@@ -151,6 +161,44 @@ def _stage_input_shapes(vae_config, latent_shape):
                 shapes[name] = tuple(hidden.shape)
                 hidden = fn(hidden)
     return shapes
+
+
+def _encoder_stage_input_shapes(vae_config, image_shape):
+    """Each encoder stage's input shape, from one pass over a meta-device encoder."""
+    from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
+
+    with torch.device("meta"):
+        vae = AutoencoderKLConv3D.from_config({**vae_config})
+        hidden = torch.empty(image_shape)
+        shapes = {}
+        with torch.no_grad():
+            for name, fn in encoder_stages(vae):
+                shapes[name] = tuple(hidden.shape)
+                hidden = fn(hidden)
+    return shapes
+
+
+def main_encoder() -> None:
+    from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
+
+    config = get_config(args.model_path, trust_remote_code=True)
+    vae_config = dict(config.vae)
+    image_shape = (1, 3, int(vae_config["ffactor_temporal"]), args.height, args.width)
+    shape = _encoder_stage_input_shapes(vae_config, image_shape)[args.stage]
+
+    initialize_lite()
+    ensure_current_device_index()
+    from vllm_omni.platforms import current_omni_platform
+
+    device = current_omni_platform.get_torch_device(0)
+    host_vae = AutoencoderKLConv3D.from_config({**vae_config}).eval()
+    encoder = StagedDeviceEncoder(host_vae, vae_config, device, dtype=getattr(torch, args.dtype))
+    stage = dict(encoder._stages_for(args.height))[args.stage]
+    hidden = torch.zeros(shape, dtype=encoder.dtype).to(device)
+    start = time.perf_counter()
+    with torch.no_grad():
+        stage(hidden).to("cpu")
+    print(f"[{args.stage}] input {shape}: compiled and ran in {time.perf_counter() - start:.0f}s")
 
 
 def main_sharded() -> None:
@@ -210,6 +258,8 @@ def main_sharded() -> None:
 def main() -> None:
     if args.rank is not None:
         return main_sharded()
+    if args.encoder:
+        return main_encoder()
     from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
 
     config = get_config(args.model_path, trust_remote_code=True)

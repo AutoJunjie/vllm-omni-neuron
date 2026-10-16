@@ -1,8 +1,10 @@
 # HunyuanImage-3.0-Instruct DiT-only text-to-image on one trn2.48xlarge.
 #
 # The Neuron counterpart of upstream's vllm_omni/deploy/hunyuan_image3_dit.yaml: one
-# diffusion stage, no AR stage. A request is a text prompt in and one 1024x1024 image out,
-# with classifier-free guidance (the checkpoint's guidance 2.5, 50 steps by default).
+# diffusion stage, no AR stage. A request is a text prompt (and optionally conditioning
+# images to edit) in and one 1024x1024 image out, with classifier-free guidance (the
+# checkpoint's guidance 2.5, 50 steps by default). hunyuan_image3_dit_ar.yaml runs think /
+# recaption on the same backbone first.
 #
 # 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2) as two TP16
 # replicas, one CFG branch each (parallel_config). Attention is head-parallel (2 of the
@@ -33,6 +35,10 @@ stage_args:
         # Prompt bucket. The prefill graph is compiled for this length and the prompt is
         # right-padded to it; a different value is a separate (one-off) compile.
         prefill_len: 512
+        # More prompt buckets (prefill_len is always one): each request takes the smallest
+        # that fits; each is its own prefill and denoise graphs, compiled on first use. A
+        # 1024x1024 conditioning image adds ~5.1k tokens (4096 VAE + 1024 ViT).
+        prefill_buckets: [512, 6144, 8192]
         # MoE implementation. `nki` (default) routes the routed experts through the
         # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
         # router selected; `torch` evaluates every local expert densely.

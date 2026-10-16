@@ -4,11 +4,13 @@
 #
 # Runs on the node host (not inside the container). Logs to
 # /opt/dlami/nvme/omni-lite/logs/bootstrap.log; the weight download logs to weights.log.
+# REPO / BRANCH pick the plugin checkout (default: this repository's main).
 set -u
 ROOT=/opt/dlami/nvme/omni-lite
 IMAGE=public.ecr.aws/neuron/pytorch-inference-vllm-neuronx:0.24.0.1.1.0-neuronx-py313-sdk2.32.0-ubuntu24.04
 NS="--namespace omni-lite"
-BRANCH=${BRANCH:-hunyuan-image3-instruct}
+REPO=${REPO:-https://github.com/aws-neuron/vllm-omni-neuron.git}
+BRANCH=${BRANCH:-main}
 # The DLC ships libtorch-neuronx-lite 2.11.0.1.0.1284, which has no `_compiler`
 # submodule; the plugin's lite_compat needs it for device_count/nki_op/mesh registry.
 LITE_PIN="libtorch-neuronx-lite==2.11.0.1.0.2651+723ba691"
@@ -59,7 +61,7 @@ nerdctl $NS exec omni-lite bash -lc '
 set -e
 if [ ! -d /workspace/plugin/.git ]; then
   rm -rf /workspace/plugin
-  git clone -q https://github.com/AutoJunjie/vllm-omni-neuron.git /workspace/plugin
+  git clone -q '"$REPO"' /workspace/plugin
 fi
 cd /workspace/plugin
 git fetch -q origin

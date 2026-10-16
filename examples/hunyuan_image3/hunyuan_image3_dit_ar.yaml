@@ -1,0 +1,88 @@
+# HunyuanImage-3.0-Instruct AR (think / recaption) + DiT on one trn2.48xlarge.
+#
+# hunyuan_image3_dit.yaml with the text generated first: the prompt's think / recaption
+# text is decoded greedily on the DiT's own backbone (no separate AR stage or device),
+# then the image is generated conditioned on the prompt plus that text. Same mesh and
+# settings as hunyuan_image3_dit.yaml; only the prompt buckets are larger and bot_task
+# defaults to think.
+#
+# 32 logical NeuronCores (8 Trainium2 chips at NEURON_LOGICAL_NC_CONFIG=2) as two TP16
+# replicas, one CFG branch each (parallel_config). For the text, the two ranks that hold
+# the same backbone shard split it, each decoding half of its heads and experts.
+#
+# `devices` is the visible logical-core range.
+stage_args:
+  - stage_id: 0
+    stage_type: diffusion
+    final_output: true
+    final_output_type: image
+    runtime:
+      process: true
+      devices: "0-31"
+      max_batch_size: 1
+    engine_args:
+      model_class_name: HunyuanImage3ForCausalMM
+      model_stage: diffusion
+      dtype: bfloat16
+      trust_remote_code: true
+      model_config:
+        # bot_task for requests that do not set one. The served chat endpoint of vllm-omni
+        # 0.24 drops a per-request bot_task, so this is how a server runs think / recaption;
+        # run.py --bot-task and requests that carry one (later vllm-omni) take precedence.
+        bot_task: think
+        # Prompt bucket. The prefill graph is compiled for this length and the prompt is
+        # right-padded to it; a different value is a separate (one-off) compile.
+        prefill_len: 2560
+        # More prompt buckets (prefill_len is always one): each request, and its think /
+        # recaption text, takes the smallest that fits; each is its own prefill and denoise
+        # graphs, compiled on first use. A 1024x1024 conditioning image adds ~5.1k tokens
+        # (4096 VAE + 1024 ViT), the unified system prompt and think text more.
+        prefill_buckets: [2560, 8192]
+        # Generated tokens per AR request (think / recaption), at most. The AR prompt is
+        # ~1260 tokens with the en_unified system prompt, so 2560 holds it plus 1024
+        # generated tokens, and the DiT prompt that carries them.
+        ar_max_new_tokens: 1024
+        # MoE implementation. `nki` (default) routes the routed experts through the
+        # blockwise CTE MoE kernel, which computes only the (token, expert) pairs the
+        # router selected; `torch` evaluates every local expert densely.
+        moe_kernel: nki
+        # The moe_cte loop. shard_on_i_hybrid runs a dynamic loop over only the blocks the
+        # router filled: 5.2 ms per layer on one rank at block 512, against 10.5 ms dense
+        # and 18.3 ms for shard_on_block, which walks every block whether live or not.
+        moe_implementation: shard_on_i_hybrid
+        # Tokens per kernel block. With the dynamic loop, 512 beats 1024 (5.9 ms) and 256
+        # (5.6 ms): smaller blocks pad less, until per-block overhead takes over.
+        moe_block_size: 512
+        # Split the UNet patch embed and final layer by GroupNorm group across the ranks
+        # instead of running them whole on every rank (~245 ms of a 760 ms step).
+        unet_parallel: true
+        # Where the output rank decodes. `neuron` runs the decoder on device as seven
+        # staged 16-bit graphs with float32 reductions, ~1.2 s against 29 s on the host.
+        # Each new resolution or dtype compiles those graphs once (~45 min at 1024x1024
+        # with compile_vae_stages.py, ~2 h inside the first request). `cpu` is the
+        # float32 reference.
+        vae_device: neuron
+        # Device VAE dtype. float16 is as fast as bfloat16 and closer to the host decode
+        # (66.5 vs 58.7 dB PSNR on a real image); its GroupNorms square in a range-safe way.
+        vae_device_dtype: float16
+        # Split the device decode by image rows over ranks 0..N-1 (neighbouring cores of
+        # the first chip), each with a halo of rows and the GroupNorm statistics
+        # all-reduced, so the image matches the one-core decode (69.7 dB, max 1/255). Two
+        # halves fit beside a TP16 backbone shard (20.7 of 24 GiB) and decode in 1.16 s;
+        # the whole decode on the output rank's core does not fit beside one. Fill its
+        # NEFF cache ahead of time with compile_vae_stages.py --vae-parallel 2; with
+        # vae_device: cpu it is unused.
+        vae_parallel: 2
+        # Dtype of the host decode (vae_device: cpu, or a shape the device cannot take).
+        vae_dtype: float32
+      parallel_config:
+        # TP16 x 2 CFG replicas over the 32 cores (pairs (r, r + 16), one CFG branch
+        # each). Against TP32 with both branches batched: a step's all-reduces and the
+        # per-rank norms and router cover half the tokens -- a CFG step 0.558 -> 0.442 s.
+        # The final layer gathers both branches inside the step graph. A request must use
+        # CFG (guidance_scale > 1) with cfg_parallel_size: 2; with tensor_parallel_size: 32
+        # and cfg_parallel_size: 1 the two branches run batched on one TP32 group instead.
+        tensor_parallel_size: 16
+        cfg_parallel_size: 2
+        ring_degree: 1
+        vae_patch_parallel_size: 1

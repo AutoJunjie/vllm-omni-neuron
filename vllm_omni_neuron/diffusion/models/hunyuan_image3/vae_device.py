@@ -516,6 +516,249 @@ class ShardedDeviceDecoder(StagedDeviceDecoder):
         return decoded
 
 
+
+# --- the encode split across ranks by rows ----------------------------------------------
+#
+# The encoder mirrors the decoder: 3x3x3 convolutions at falling resolutions, a DCAE
+# downsample (convolution, then space-to-depth) per level, and a middle block whose
+# attention spans the whole 64x64 latent. The decoder's installers walk ``vae.decoder``;
+# :class:`_EncoderView` hands them the encoder instead, so the float32 reductions and the
+# NKI convolutions are the same code (and the decoder's cached NEFFs keep their lines).
+
+
+class _EncoderView:
+    """``vae`` as the decoder-scoped installers see it, with the encoder as ``decoder``."""
+
+    def __init__(self, vae):
+        self.decoder = vae.encoder
+
+    def requires_grad_(self, flag: bool):
+        self.decoder.requires_grad_(flag)
+        return self
+
+
+def encoder_stages(vae):
+    """``vae.encoder.forward`` as sequential stages: one per level, then middle + head."""
+    from einops import rearrange  # noqa: I001  the blank line below keeps the NEFF keys' lines
+
+    from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import swish
+
+    encoder = vae.encoder
+    stages = []
+    for i_level in range(len(encoder.block_out_channels)):
+
+        def stage_level(h, level=encoder.down[i_level], first=i_level == 0):
+            if first:
+                h = encoder.conv_in(h)
+            for block in level.block:
+                h = block(h)
+            if hasattr(level, "downsample"):
+                h = level.downsample(h)
+            return h
+
+        stages.append((f"down{i_level}", stage_level))
+
+    def stage_out(h):
+        h = encoder.mid.block_1(h)
+        h = encoder.mid.attn_1(h)
+        h = encoder.mid.block_2(h)
+        group_size = encoder.block_out_channels[-1] // (2 * encoder.z_channels)
+        shortcut = rearrange(h, "b (c r) f h w -> b c r f h w", r=group_size).mean(dim=2)
+        h = encoder.conv_out(swish(encoder.norm_out(h)))
+        return h + shortcut
+
+    stages.append(("mid+out", stage_out))
+    return stages
+
+
+def encoder_shard_plan(vae, image_height: int, parts: int) -> list[dict]:
+    """Each encoder stage's input band of rows for a ``parts``-way split of the image.
+
+    The halos grow towards the input, the opposite of :func:`shard_plan`: the last split
+    stage must come out exact on its owned rows (the middle block's attention needs the
+    whole latent, gathered after it), and walking back each level needs twice the rows
+    below it (space-to-depth), plus one per convolution at its own resolution and one for
+    ``conv_in``. Halos at a downsampling stage are rounded up to even, so every band
+    starts on a row pair and the rearrange pairs rows as the whole image does.
+    """
+    encoder = vae.encoder
+    levels = len(encoder.block_out_channels)
+    heights, radii, downs = [], [], []
+    height = image_height
+    for i_level in range(levels):
+        level = encoder.down[i_level]
+        down = hasattr(level, "downsample")
+        heights.append(height)
+        radii.append(2 * len(level.block) + int(down) + int(i_level == 0))
+        downs.append(down)
+        height //= 2 if down else 1
+    plan = [{"name": "mid+out", "height": height, "halo": None}]
+    halo = 0
+    for i_level in reversed(range(levels)):
+        halo = (2 * halo if downs[i_level] else halo) + radii[i_level]
+        if downs[i_level]:
+            halo += halo % 2
+        plan.append({"name": f"down{i_level}", "height": heights[i_level], "halo": halo})
+    plan.reverse()
+    for stage in plan:
+        if stage["height"] % parts or (stage["height"] // parts) % 2 and stage["halo"] is not None:
+            raise ValueError(f"{stage['name']} height {stage['height']} does not split {parts} ways")
+        stage["core"] = stage["height"] // parts
+    return plan
+
+
+def sharded_encoder_stages(vae, plan: list[dict], rank: int, parts: int, group):
+    """:func:`encoder_stages` for this rank's band; the last split stage gathers the rows."""
+    import torch.distributed as dist
+
+    full = dict(encoder_stages(vae))
+    split = [stage for stage in plan if stage["halo"] is not None]
+    if hasattr(vae.encoder.down[len(split) - 1], "downsample"):
+        raise ValueError("the last split encoder stage must keep its resolution")
+    stages = []
+    # Where the previous stage's output starts, in its own rows: a band's start halved by
+    # each downsample, or 0 once the bands are gathered into the whole latent.
+    previous_start, previous_scale = 0, 1
+    for index, stage in enumerate(plan):
+        name, fn = stage["name"], full[stage["name"]]
+        start, stop = band(stage, rank, parts)
+        offset = start - previous_start // previous_scale
+        rows = stop - start
+        gather = stage is split[-1]
+
+        def run(h, fn=fn, offset=offset, rows=rows, gather=gather, stage=stage, start=start):
+            h = fn(h[..., offset : offset + rows, :])
+            if not gather:
+                return h
+            lo = rank * stage["core"] - start
+            own = h[..., lo : lo + stage["core"], :].contiguous()
+            out = own.new_empty((parts * own.shape[0], *own.shape[1:]))
+            dist.all_gather_into_tensor(out, own, group=group)
+            return torch.cat(out.reshape(parts, *own.shape).unbind(0), dim=-2)
+
+        stages.append((name, run))
+        if index + 1 < len(plan):
+            previous_scale = stage["height"] // plan[index + 1]["height"]
+            previous_start = 0 if gather else start
+    return stages
+
+
+class _PaddedConvIn(nn.Module):
+    """``conv_in`` over zero-padded input channels, so the NKI convolution takes it.
+
+    The encoder's first convolution reads the 3 image channels, under the kernel's
+    96-channel floor; left to the compiler at 1024x1024 x 4 frames it alone came to most
+    of a 13.7 GiB NEFF. Zero channels with zero weights leave the result exact.
+    """
+
+    def __init__(self, conv: nn.Conv3d, channels: int):
+        super().__init__()
+        self.pad = channels - conv.in_channels
+        self.conv = nn.Conv3d(
+            channels, conv.out_channels, conv.kernel_size, conv.stride, conv.padding
+        ).to(conv.weight.dtype)
+        with torch.no_grad():
+            weight = torch.zeros_like(self.conv.weight)
+            weight[:, : conv.in_channels] = conv.weight.detach().cpu()
+            self.conv.weight.copy_(weight)
+            self.conv.bias.copy_(conv.bias.detach().cpu())
+        self.conv.requires_grad_(False)
+
+    def forward(self, x):
+        return self.conv(torch.nn.functional.pad(x, (0, 0, 0, 0, 0, 0, 0, self.pad)))
+
+
+class StagedDeviceEncoder:
+    """The VAE encoder on one NeuronCore, 16-bit with float32 reductions, staged graphs.
+
+    The encoder half of :class:`StagedDeviceDecoder`: built from the pipeline's host VAE,
+    one compiled graph per level and one for the middle block and head. ``encode``
+    returns the posterior's moments; the caller samples them.
+    """
+
+    def __init__(self, host_vae, vae_config, device, dtype=torch.float16):
+        from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import AutoencoderKLConv3D
+
+        start = time.perf_counter()
+        self.device, self.dtype = device, dtype
+        self.ffactor_temporal = int(vae_config["ffactor_temporal"])
+        vae = AutoencoderKLConv3D.from_config({**vae_config}).to(dtype).eval()
+        vae.requires_grad_(False)
+        del vae.decoder
+        state = {
+            name: tensor.detach().to(dtype)
+            for name, tensor in host_vae.state_dict().items()
+            if name.startswith("encoder.")
+        }
+        missing = sorted(set(vae.encoder.state_dict()) - {n[len("encoder.") :] for n in state})
+        if missing:
+            raise RuntimeError(f"Device VAE encoder weights missing from the host VAE: {missing[:6]}")
+        vae.load_state_dict(state, strict=False, assign=True)
+        from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_nki_conv import _MIN_IN_CHANNELS
+
+        vae.encoder.conv_in = _PaddedConvIn(vae.encoder.conv_in, _MIN_IN_CHANNELS)
+        self.vae = vae.to(device)
+        summary = prepare_device_decoder(_EncoderView(self.vae))
+        torch._dynamo.config.recompile_limit = max(torch._dynamo.config.recompile_limit, 64)
+        self._plans: dict = {}
+        logger.info(
+            "HunyuanImage3: VAE encoder on %s in %s, %d NKI convs, built in %.1fs",
+            device,
+            dtype,
+            summary["routed"],
+            time.perf_counter() - start,
+        )
+
+    def _stages_for(self, height: int):
+        if height not in self._plans:
+            self._plans[height] = [
+                (name, compile_stage(f"encode_{name}", fn)) for name, fn in encoder_stages(self.vae)
+            ]
+        return self._plans[height]
+
+    def encode(self, pixels: torch.Tensor) -> torch.Tensor:
+        """``vae.encode(pixels)``'s moments for a ``(B, C, H, W)`` image, float32 on host.
+
+        A single frame is repeated ``ffactor_temporal`` times, as ``AutoencoderKLConv3D``
+        does before encoding.
+        """
+        x = pixels.reshape(-1, *pixels.shape[-3:]).unsqueeze(2)
+        x = x.expand(-1, -1, self.ffactor_temporal, -1, -1).contiguous()
+        hidden = x.to(self.dtype).to(self.device)
+        with torch.no_grad():
+            for _, stage in self._stages_for(int(x.shape[-2])):
+                hidden = stage(hidden)
+        return hidden.to("cpu").float()
+
+
+class ShardedDeviceEncoder(StagedDeviceEncoder):
+    """:class:`StagedDeviceEncoder` split ``parts`` ways by image rows across ranks.
+
+    Every rank in ``group`` calls :meth:`encode` with the same pixels; each computes its
+    band of rows (:func:`encoder_shard_plan`) on its own core, with the GroupNorm
+    statistics all-reduced over the owned rows, and all of them return the moments.
+    The group must include global rank 0, or be bootstrapped while it is busy: a new
+    device communicator handshakes through rank 0's root port.
+    """
+
+    def __init__(self, host_vae, vae_config, device, dtype, rank: int, parts: int, group):
+        super().__init__(host_vae, vae_config, device, dtype)
+        self.rank, self.parts, self.group = rank, parts, group
+
+    def _stages_for(self, height: int):
+        if height not in self._plans:
+            plan = encoder_shard_plan(self.vae, height, self.parts)
+            pairs = [(level, f"down{i}") for i, level in enumerate(self.vae.encoder.down)]
+            install_sharded_norms(_EncoderView(self.vae), plan, self.rank, self.parts, self.group, pairs)
+            self._plans[height] = [
+                (name, compile_stage(f"encode_{name}_rows{self.rank}of{self.parts}", fn))
+                for name, fn in sharded_encoder_stages(
+                    self.vae, plan, self.rank, self.parts, self.group
+                )
+            ]
+        return self._plans[height]
+
+
 def vae_row_groups(parts: int):
     """The groups of the ``vae_parallel`` row split: ``parts``-rank blocks over the world.
 

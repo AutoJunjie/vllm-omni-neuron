@@ -15,15 +15,15 @@ validation and performance benchmarking.
 |---|---|---|---|---|---|---|
 | Wan2.2 | T2V-A14B | Text to video | Trn2, Trn3 | ✅ | ✅ | In progress |
 | Wan2.2 | I2V-A14B | Image to video | Trn2, Trn3 | ✅ | ✅ | In progress |
-| HunyuanImage-3.0 | Instruct | Text to image (DiT-only, 1024x1024) | Trn2 | ✅ [^hy3] | ✅ | In progress |
+| HunyuanImage-3.0 | Instruct | Text to image, think / recaption, image editing (1024x1024) | Trn2 | ✅ [^hy3] | ✅ | In progress |
 
 - **Correctness** — Accuracy validation passing (VBench / GenEval and reference comparison)
 - **Perf Test** — Performance benchmark tests tracked across releases
 - **Perf Tuning** — Active optimization work being done
 
-[^hy3]: HunyuanImage-3.0 correctness: three tiers of hardware tests — components
-    and one denoising step against the official implementation, and a full generation
-    against a reviewed golden output. See the
+[^hy3]: HunyuanImage-3.0 correctness: GenEval 0.864 (one image per prompt), and three
+    tiers of hardware tests — components and one denoising step against the official
+    implementation, and a full generation against a reviewed golden output. See the
     [model card](docs/models/hunyuan-image3-instruct.md#accuracy-evaluation).
 
 See the [model cards](docs/models/) for recommended configurations, accuracy
