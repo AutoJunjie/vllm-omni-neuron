@@ -15,7 +15,7 @@ validation and performance benchmarking.
 |---|---|---|---|---|---|---|
 | Wan2.2 | T2V-A14B | Text to video | Trn2, Trn3 | ✅ | ✅ | In progress |
 | Wan2.2 | I2V-A14B | Image to video | Trn2, Trn3 | ✅ | ✅ | In progress |
-| HunyuanImage-3.0 | Instruct | Text to image (DiT-only, 1024x1024) | Trn2 | ✅ [^hy3] | ✅ | In progress |
+| HunyuanImage-3.0 | Instruct | Text to image, think / recaption, image editing (1024x1024) | Trn2 | ✅ [^hy3] | ✅ | In progress |
 
 - **Correctness** — Accuracy validation passing (VBench / GenEval and reference comparison)
 - **Perf Test** — Performance benchmark tests tracked across releases

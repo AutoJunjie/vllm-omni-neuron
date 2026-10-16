@@ -21,11 +21,14 @@ A regression run checks all of these before it compares images: a missing or alt
 golden, a different checkpoint, stage config, request or initial latents fails (package
 versions that differ are reported). To produce the goldens, review a run's outputs and
 rerun with ``HY3_UPDATE_GOLDEN=1`` and ``HY3_MODEL_REVISION`` set to the checkpoint's
-revision (``HY3_PLUGIN_COMMIT`` when the checkout is not a git tree).
+revision (``HY3_PLUGIN_COMMIT`` when the checkout is not a git tree). A case not yet in
+the manifest runs only in update mode. The edit case's input image is a fixed file next
+to the goldens (``hunyuan_image3_edit_input.png``, the Mars text-to-image output), pinned
+by sha256 in the manifest's ``inputs`` when the case's golden is written.
 
 Latency: the faster of each case's two warm requests must stay within
-``HY3_LATENCY_TOLERANCE`` (default 10%) of the manifest's, the slower of the reviewed
-run's two.
+``HY3_LATENCY_TOLERANCE`` (default 10%; 25% for the edit case, whose host-side SigLIP2
+encode varies by seconds) of the manifest's, the slower of the reviewed run's two.
 
     pytest -s test/neuron/test_hunyuan_image3_e2e_accuracy.py
 """
@@ -60,12 +63,28 @@ UPDATE = os.environ.get("HY3_UPDATE_GOLDEN") == "1"
 # cache) changes the trajectory, 0.946 at 30.6 dB; an unrelated image scores 0.18.
 SSIM_MIN = float(os.environ.get("HY3_SSIM_MIN", "0.95"))
 LATENCY_TOLERANCE = float(os.environ.get("HY3_LATENCY_TOLERANCE", "0.10"))
+# The edit case encodes its conditioning image with SigLIP2 on the host, whose time
+# varies: warm requests measured 16.0-21.0 s on one node and build.
+CASE_LATENCY_TOLERANCE = {"edit": 0.25}
+EDIT_INPUT = "hunyuan_image3_edit_input.png"
 
 
 # name -> (golden file, run.py arguments), in run order.
 CASES = {
     # Text-to-image, the default stage config (1024x1024, CFG 2.5, 50 steps).
     "t2i": ("hunyuan_image3_t2i_mars_seed42.png", ["--prompt", MARS_PROMPT]),
+    # Image editing (VAE + ViT conditioning tokens) on the fixed input image EDIT_INPUT.
+    "edit": (
+        "hunyuan_image3_edit_starry_seed42.png",
+        ["--prompt", "Turn the sky into a starry night, keep everything else unchanged.",
+         "--image", os.path.join(GOLDEN_DIR, EDIT_INPUT)],
+    ),
+    # Think on the backbone (AR, greedy), then the image conditioned on the text.
+    "t2i_think": (
+        "hunyuan_image3_t2i_think_mars_seed42.png",
+        ["--prompt", MARS_PROMPT, "--bot-task", "think",
+         "--stage-config", os.path.join(EXAMPLES, "hunyuan_image3_dit_ar.yaml")],
+    ),
 }
 
 
@@ -84,9 +103,11 @@ def _tensor_sha256(tensor) -> str:
 
 def _manifest() -> dict:
     if not os.path.isfile(MANIFEST):
-        return {"cases": {}}
+        return {"cases": {}, "inputs": {}}
     with open(MANIFEST) as handle:
-        return json.load(handle)
+        manifest = json.load(handle)
+    manifest.setdefault("inputs", {})
+    return manifest
 
 
 def _conditions(case_args, model_path, trace_dir) -> dict:
@@ -160,6 +181,8 @@ def _update(manifest, case, golden_name, output, warm, conditions, provenance) -
     os.makedirs(GOLDEN_DIR, exist_ok=True)
     torch.save(latents.contiguous().clone(), os.path.join(GOLDEN_DIR, latents_file))
     shutil.copyfile(output, os.path.join(GOLDEN_DIR, golden_name))
+    if case == "edit":
+        manifest["inputs"][EDIT_INPUT] = _sha256(os.path.join(GOLDEN_DIR, EDIT_INPUT))
     manifest["cases"][case] = entry
     with open(MANIFEST + ".tmp", "w") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
@@ -189,12 +212,19 @@ def test_generation_matches_golden(require_neuron_device, tmp_path, case):
     manifest = _manifest()
     entry = manifest["cases"].get(case)
     provenance = _provenance() if UPDATE else None
+    if case == "edit":
+        assert os.path.isfile(os.path.join(GOLDEN_DIR, EDIT_INPUT)), f"{case}: no input {EDIT_INPUT}"
     if not UPDATE:
         assert entry is not None and os.path.isfile(golden), (
             f"{case}: no golden {golden_name} in {GOLDEN_DIR}; review an output and rerun with "
             "HY3_UPDATE_GOLDEN=1"
         )
-        assert _sha256(golden) == entry["sha256"], f"{golden_name} does not match manifest.json"
+        pinned = {golden_name: entry["sha256"], **manifest["inputs"]}
+        for name in [golden_name] + ([EDIT_INPUT] if case == "edit" else []):
+            assert name in pinned, f"{name} is not pinned in manifest.json"
+            assert _sha256(os.path.join(GOLDEN_DIR, name)) == pinned[name], (
+                f"{name} does not match manifest.json"
+            )
     output, trace = tmp_path / f"{case}.png", tmp_path / "trace"
     log = run_example(
         "run.py",
@@ -216,7 +246,7 @@ def test_generation_matches_golden(require_neuron_device, tmp_path, case):
     score, db = ssim(actual, expected), psnr(actual, expected)
     print(f"{case}: SSIM {score:.4f}, PSNR {db:.2f} dB against {golden_name}")
     assert score >= SSIM_MIN, f"{case}: SSIM {score:.4f} < {SSIM_MIN} against {golden_name}"
-    limit = entry["warm_seconds"] * (1 + LATENCY_TOLERANCE)
+    limit = entry["warm_seconds"] * (1 + CASE_LATENCY_TOLERANCE.get(case, LATENCY_TOLERANCE))
     assert min(warm) <= limit, f"{case}: warm request {min(warm):.2f} s > {limit:.2f} s (manifest {entry['warm_seconds']} s)"
 
 

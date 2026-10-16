@@ -1,8 +1,41 @@
 {
   "cases": {
+    "edit": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-16T09:19Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_edit_starry_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "b4ecd1678460a849658b35de904cd43d7c8989ca23e4eeed0adc5afeb164ffbf",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "tree:e2de2527854fc2aa1325b202f5d016c35ba9aecc",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "Turn the sky into a starry night, keep everything else unchanged.",
+        "--image",
+        "<goldens>/hunyuan_image3_edit_input.png"
+      ],
+      "sha256": "d953b3ad992e73a9a5b8ac5472d274239e05b90a8df5954007389cf66edb395c",
+      "stage_config_sha256": "0ce6aca32975d49270d1d7e9f892a1fe65251b07f096153ee05876e2a7e9a3d7",
+      "warm_seconds": 28.6
+    },
     "t2i": {
       "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
-      "created": "2026-10-15T08:58Z",
+      "created": "2026-10-16T09:10Z",
       "environment": {
         "diffusers": "0.38.0",
         "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
@@ -20,7 +53,7 @@
       },
       "input_ids_sha256": "a7a1446cb84c0957922de05edf1cfd145b98e7c643e106d1c15062d4a911984f",
       "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
-      "plugin_commit": "tree:b8a0901ceaa9882382195577ae5fcd75cf924cdc",
+      "plugin_commit": "tree:e2de2527854fc2aa1325b202f5d016c35ba9aecc",
       "request": [
         "--seed",
         "42",
@@ -28,8 +61,46 @@
         "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed"
       ],
       "sha256": "685365e5a64a3dd4c5f2eecee72e8304a6fd66c68335ff608dc748849c4165b1",
-      "stage_config_sha256": "e7e8e6ad7fb9cdbd5f905e9ca7f1760abeadcbed4935a96048516f83e3937d8d",
-      "warm_seconds": 19.39
+      "stage_config_sha256": "0ce6aca32975d49270d1d7e9f892a1fe65251b07f096153ee05876e2a7e9a3d7",
+      "warm_seconds": 19.41
+    },
+    "t2i_think": {
+      "checkpoint_fingerprint": "6649a41f20e94b5704114c9fbfbd4f02873b54fe09111c0c59cf045e99687b2e",
+      "created": "2026-10-16T09:30Z",
+      "environment": {
+        "diffusers": "0.38.0",
+        "libtorch-neuronx-lite": "2.11.0.1.0.2651+723ba691",
+        "neuronx-cc": "2.27.5334.0+f702b353",
+        "torch": "2.11.0",
+        "transformers": "5.15.0",
+        "vllm": "0.24.0",
+        "vllm-neuron": "0.24.0.1.1.0",
+        "vllm-omni": "0.24.0"
+      },
+      "golden": "hunyuan_image3_t2i_think_mars_seed42.png",
+      "initial_latents": {
+        "file": "initial_latents_10543f477ae1.pt",
+        "sha256": "10543f477ae1e5573e72cf20ce66ae39569c7bbd4aa56fd443947c53d34378a9"
+      },
+      "input_ids_sha256": "6b708cc3d4e5edae16fff3293a00635e7085a268068126df83a1cdc451185d8a",
+      "model_revision": "2ec2c78bee7d4b94157341fba86c4c2c7b1858b2",
+      "plugin_commit": "tree:e2de2527854fc2aa1325b202f5d016c35ba9aecc",
+      "request": [
+        "--seed",
+        "42",
+        "--prompt",
+        "A cinematic photo of a glass observatory on Mars at sunrise, volumetric light, ultra detailed",
+        "--bot-task",
+        "think",
+        "--stage-config",
+        "<examples>/hunyuan_image3_dit_ar.yaml"
+      ],
+      "sha256": "1866c8f1c3ae7561a92895a2b20398d0be042f04c010209d529b7badcf87b199",
+      "stage_config_sha256": "6fa18e0fecd2b9c96643d02962c6de95e0672988af9a70d99cc22ac57acdbc69",
+      "warm_seconds": 28.54
     }
+  },
+  "inputs": {
+    "hunyuan_image3_edit_input.png": "685365e5a64a3dd4c5f2eecee72e8304a6fd66c68335ff608dc748849c4165b1"
   }
 }

@@ -5,11 +5,14 @@ Each test drives one pipeline / model method on a stand-in ``self``, so none nee
 checkpoint:
 
 * the MoE router keeps exactly ``top_k`` experts when the k-th probability ties;
-* a request is text-to-image at 1024 x 1024 with no think / recaption text and no
-  conditioning image, and with CFG replicas it must use CFG; anything else raises
-  before any device work;
+* a request may ask for text-to-image or think / recaption (with or without
+  conditioning images) at 1024 x 1024, and with CFG replicas it must use CFG; anything
+  else raises before any device work;
 * the request's ``bot_task`` falls back to the stage's ``model_config.bot_task``;
-* model_config keys of features this build does not include raise when set;
+* model_config keys of features this build does not include raise when set, while the
+  prompt-bucket, think / recaption and image-editing keys pass;
+* prompt buckets: ``prefill_len`` is always one, a prompt takes the smallest that fits;
+* the conditioning images encode on device on one rank, or on the host;
 * ``vae_parallel`` (the row split of the device decode) is unused with the host decode;
 * ``od_config.revision`` reaches the hub snapshot;
 * the request pre-processor reads the checkpoint at ``od_config.revision`` too.
@@ -49,34 +52,42 @@ def test_router_keeps_exactly_top_k_on_a_tie() -> None:
 def _pipeline_stub(cfg_parallel: bool = True, **model_config):
     from vllm_omni_neuron.diffusion.models.hunyuan_image3.pipeline_hunyuan_image3 import (
         NeuronHunyuanImage3Pipeline,
+        _prompt_buckets,
     )
 
     stub = SimpleNamespace(
         od_config=SimpleNamespace(model_config=model_config, model="org/model", revision="abc123"),
+        _prefill_buckets=_prompt_buckets(model_config),
         vae_device=model_config.get("vae_device", "neuron"),
         cfg_parallel=cfg_parallel,
     )
     return NeuronHunyuanImage3Pipeline, stub
 
 
-_SUPPORTED = dict(bot_task="image", cot_text_list=[None], height=1024, width=1024, guidance=2.5)
+_SUPPORTED = dict(bot_task="image", height=1024, width=1024, guidance=2.5)
 
 
-@pytest.mark.parametrize("bot_task", [None, "auto", "image", "None"])
-def test_text_to_image_requests_pass(bot_task) -> None:
+@pytest.mark.parametrize(
+    "bot_task", [None, "auto", "image", "None", "think", "recaption", "think_recaption"]
+)
+def test_supported_requests_pass(bot_task) -> None:
     cls, stub = _pipeline_stub()
     cls._check_request(stub, **{**_SUPPORTED, "bot_task": bot_task})
-    cls._check_request(stub, **_SUPPORTED, cond_images=[[]])  # a dict prompt without images
+
+
+def test_ar_tasks_match_the_generator() -> None:
+    from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_ar import AR_BOT_TASKS
+    from vllm_omni_neuron.diffusion.models.hunyuan_image3.pipeline_hunyuan_image3 import (
+        SUPPORTED_BOT_TASKS,
+    )
+
+    assert set(AR_BOT_TASKS) <= set(SUPPORTED_BOT_TASKS)
 
 
 @pytest.mark.parametrize(
     "change, error, match",
     [
-        ({"bot_task": "think"}, NotImplementedError, "bot_task 'think'"),
-        ({"bot_task": "recaption"}, NotImplementedError, "bot_task 'recaption'"),
-        ({"bot_task": "think_recaption"}, NotImplementedError, "think_recaption"),
-        ({"cot_text_list": ["<think>a red teapot</think>"]}, NotImplementedError, "AR stage"),
-        ({"cond_images": [["image"]]}, NotImplementedError, "image editing"),
+        ({"bot_task": "img_ratio"}, NotImplementedError, "bot_task 'img_ratio'"),
         ({"height": 512, "width": 512}, ValueError, "512x512"),
         ({"height": 1024, "width": 768}, ValueError, "1024x768"),
         ({"guidance": 1.0}, ValueError, "turns CFG off"),
@@ -107,7 +118,6 @@ def test_bot_task_falls_back_to_the_stage_config() -> None:
     [
         {"step_cache": {"residual_diff_threshold": 0.12}},
         {"tea_cache": True},
-        {"prefill_buckets": [512, 6144]},
         {"cfg_combine": "mixin"},
         {"tp_sequence_parallel": True},
         {"vae_device_core": 16},
@@ -128,6 +138,60 @@ def test_disabled_later_features_are_accepted() -> None:
     )
 
     _check_model_config({"step_cache": False, "tea_cache": False, "bot_task": "image"})
+
+
+def test_m2_keys_are_accepted() -> None:
+    from vllm_omni_neuron.diffusion.models.hunyuan_image3.pipeline_hunyuan_image3 import (
+        _check_model_config,
+    )
+
+    _check_model_config(
+        {
+            "prefill_len": 2560,
+            "prefill_buckets": [2560, 8192],
+            "ar_max_new_tokens": 1024,
+            "bot_task": "think",
+            "vae_encode_device": "neuron",
+            "vae_encode_rank": 2,
+        }
+    )
+
+
+def test_prefill_len_is_always_a_bucket() -> None:
+    cls, stub = _pipeline_stub(prefill_len=16384, prefill_buckets=[512, 6144, 8192])
+    assert cls._prefill_bucket(stub, 300) == 512
+    assert cls._prefill_bucket(stub, 9000) == 16384
+    with pytest.raises(ValueError, match="largest prompt bucket is 16384"):
+        cls._prefill_bucket(stub, 20000)
+
+
+def test_single_bucket_without_prefill_buckets() -> None:
+    cls, stub = _pipeline_stub(prefill_len=512)
+    assert cls._prefill_bucket(stub, 512) == 512
+    with pytest.raises(ValueError, match="largest prompt bucket is 512"):
+        cls._prefill_bucket(stub, 513)
+
+
+@pytest.mark.parametrize(
+    "model_config, expected",
+    [
+        ({}, 0),  # one rank, no row split: the encode runs on rank 0's core
+        ({"vae_encode_device": "cpu"}, None),
+        ({"vae_device": "cpu"}, None),  # no device VAE: the host encodes
+        ({"vae_encode_rank": 3}, None),  # beyond the world: the host encodes
+    ],
+)
+def test_vae_encode_rank(model_config, expected) -> None:
+    cls, stub = _pipeline_stub(**model_config)
+    stub._vae_split = lambda: (1, None)
+    assert cls._vae_encode_rank(stub) == expected
+
+
+def test_vae_encode_device_is_checked() -> None:
+    cls, stub = _pipeline_stub(vae_encode_device="gpu")
+    stub._vae_split = lambda: (1, None)
+    with pytest.raises(ValueError, match="vae_encode_device"):
+        cls._vae_encode_rank(stub)
 
 
 def test_host_decode_ignores_the_row_split() -> None:

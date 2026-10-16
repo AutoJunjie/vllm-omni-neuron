@@ -12,6 +12,11 @@
 #                        "guidance_scale":2.5,"seed":42}}' \
 #     | jq -r '.choices[0].message.content[0].image_url.url' \
 #     | cut -d',' -f2- | base64 -d > hunyuan_image3_output.png
+#
+# Think on the backbone before every image (vllm-omni 0.24's chat endpoint does not
+# forward a request's bot_task, so the stage config's model_config.bot_task decides):
+#
+#   bash examples/hunyuan_image3/serve.sh MODEL 8091 examples/hunyuan_image3/hunyuan_image3_dit_ar.yaml
 set -euo pipefail
 
 MODEL=${1:-/models/HunyuanImage-3.0-Instruct}

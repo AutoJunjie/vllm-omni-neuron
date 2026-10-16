@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HunyuanImage-3.0-Instruct DiT-only text-to-image on Neuron via the Omni entrypoint.
+"""HunyuanImage-3.0-Instruct on Neuron via the Omni entrypoint.
 
-One 1024x1024 image per prompt, with classifier-free guidance and no think / recaption
-text (the stage config's ``bot_task: image``).
+One 1024x1024 image per prompt, with classifier-free guidance: straight from the prompt
+(the stage config's ``bot_task: image``), after think / recaption text generated on the
+backbone (``--bot-task``), or edited from conditioning images (``--image``).
 
 Usage:
     python examples/hunyuan_image3/run.py --dev                 # 2 steps, warm the graphs
     python examples/hunyuan_image3/run.py                       # 50 steps, 1024x1024
     python examples/hunyuan_image3/run.py --profile --runs 3     # timed warm runs
+    python examples/hunyuan_image3/run.py --bot-task think \
+        --stage-config examples/hunyuan_image3/hunyuan_image3_dit_ar.yaml
+    python examples/hunyuan_image3/run.py --image input.png \
+        --prompt "Turn the sky into a starry night, keep everything else unchanged."
 """
 
 import argparse
@@ -72,13 +77,22 @@ parser.add_argument(
     "--prefill-len",
     type=int,
     default=None,
-    help="Override the prompt bucket. A new value triggers a cold prefill and denoise compile.",
+    help="Override the base prompt bucket (always one of the buckets, next to the stage "
+    "config's prefill_buckets). A new value triggers a cold prefill and denoise compile.",
 )
 parser.add_argument(
     "--moe-kernel",
     choices=["nki", "torch"],
     default=None,
     help="MoE MLP implementation. Default comes from the stage config (nki).",
+)
+parser.add_argument(
+    "--bot-task",
+    choices=["think", "recaption", "think_recaption"],
+    default=None,
+    help="Generate think / recaption text on the backbone before the image (AR + DiT). "
+    "Needs a stage config with a prefill bucket that fits the system prompt plus the "
+    "generated text, e.g. hunyuan_image3_dit_ar.yaml.",
 )
 parser.add_argument(
     "--vae-device",
@@ -98,6 +112,19 @@ parser.add_argument(
     default=None,
     help="Split the device VAE decode by rows over this many ranks (2 in the stage config; "
     "1 = the whole decode on the output rank's core).",
+)
+parser.add_argument(
+    "--prefill-buckets",
+    default=None,
+    help="Comma-separated prompt buckets, e.g. 512,6144; each request takes the smallest "
+    "that fits (each bucket is its own prefill and denoise compile).",
+)
+parser.add_argument(
+    "--image",
+    action="append",
+    default=None,
+    help="A conditioning image (image editing / IT2I); repeat for several. The prompt is the "
+    "instruction. Needs a prompt bucket that fits the image tokens (prefill_buckets).",
 )
 parser.add_argument(
     "--num-layers",
@@ -183,6 +210,10 @@ def main() -> None:
             ("vae_device", args.vae_device),
             ("num_layers", args.num_layers),
             ("vae_parallel", args.vae_parallel),
+            (
+                "prefill_buckets",
+                [int(b) for b in args.prefill_buckets.split(",")] if args.prefill_buckets else None,
+            ),
         )
         if value is not None
     }
@@ -229,7 +260,15 @@ def main() -> None:
     params = OmniDiffusionSamplingParams(**sampling_kwargs)
 
     request = {"prompt": args.prompt}
-    print(f"Generating {args.width}x{args.height}, {steps} steps")
+    if args.image:
+        from PIL import Image
+
+        request["multi_modal_data"] = {
+            "image": [Image.open(path).convert("RGB") for path in args.image]
+        }
+    if args.bot_task is not None:
+        request["bot_task"] = args.bot_task
+    print(f"Generating {args.width}x{args.height}, {steps} steps, bot_task={args.bot_task}")
     start = time.perf_counter()
     result = omni.generate(request, params)
     print(f"First (cold) generation: {time.perf_counter() - start:.2f}s")

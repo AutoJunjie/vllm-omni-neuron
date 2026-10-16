@@ -18,11 +18,11 @@ down with the Neuron execution path:
   staged float16 graphs on the output rank's core or split by rows over a few ranks
   (:mod:`.vae_device`).
 
-This is the DiT-only deployment: the prompt goes straight to the diffusion stage with
-no autoregressive think / recaption stage (``bot_task: image``), matching upstream's
-``vllm_omni/deploy/hunyuan_image3_dit.yaml``. A request is text in, one 1024 x 1024
-image out, with classifier-free guidance; :meth:`NeuronHunyuanImage3Pipeline._check_request`
-rejects what this build does not run.
+One diffusion stage, one 1024 x 1024 image per request with classifier-free guidance:
+text-to-image (``bot_task: image``, as upstream's ``deploy/hunyuan_image3_dit.yaml``);
+think / recaption text generated on the same backbone first (:mod:`.hunyuan_image3_ar`);
+and image editing, whose conditioning images' VAE and SigLIP2 tokens are prefilled with
+full attention inside each image block. :meth:`_check_request` rejects the rest.
 """
 
 import json
@@ -97,24 +97,24 @@ _REPLICATED_PREFIXES = (
     "final_layer",
 )
 
-# What a request may ask for in this build: text-to-image with no think / recaption text
-# (upstream's single-stage bot_task "image"; "auto" and an unset task template the same
-# tokens for a gen_image request), at the one compiled resolution.
-SUPPORTED_BOT_TASKS = (None, "auto", "image", "vanilla")
+# What a request may ask for: the image from the prompt (bot_task "image"; "auto" and an
+# unset task template the same tokens), or think / recaption text on the backbone first
+# (hunyuan_image3_ar.AR_BOT_TASKS), with or without conditioning images, at 1024 x 1024.
+SUPPORTED_BOT_TASKS = (None, "auto", "image", "vanilla", "think", "recaption", "think_recaption")
 SUPPORTED_SIZE = (1024, 1024)
 
 # model_config keys of features this build does not include. Set to anything but a false
-# value, they raise instead of being silently ignored.
+# value, they raise instead of being silently ignored. The keys of the prompt buckets,
+# think / recaption and image editing are supported:
+# prefill_buckets, ar_max_new_tokens, bot_task (the stage default), vae_encode_device and
+# vae_encode_rank.
 UNSUPPORTED_MODEL_CONFIG = {
     "step_cache": "the Cache-DiT step cache",
     "tea_cache": "TeaCache",
-    "prefill_buckets": "more than one prompt bucket",
     "cfg_combine": "NeuronCFGParallelMixin's CFG combine",
     "tp_sequence_parallel": "sequence parallelism inside TP",
     "enable_ring_attention": "ring attention",
     "vae_device_core": "the VAE decode on a separate core",
-    "vae_encode_device": "conditioning images (image editing)",
-    "ar_max_new_tokens": "think / recaption on the backbone",
 }
 
 
@@ -206,8 +206,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
     # loop in forward(), so the engine drives this pipeline per request.
     supports_step_execution: ClassVar[bool] = False
     supports_request_batch: ClassVar[bool] = False
-    # Text-to-image only: no conditioning images.
-    support_image_input: ClassVar[bool] = False
+    # Conditioning images (image editing); in 0.24 it only adds one to the warmup request.
+    support_image_input: ClassVar[bool] = True
     _dit_modules: ClassVar[list[str]] = ["model"]
     _encoder_modules: ClassVar[list[str]] = []
     _vae_modules: ClassVar[list[str]] = ["vae"]
@@ -246,9 +246,9 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 "HunyuanImage3 on Neuron: parallel_config.vae_patch_parallel_size > 1 (vLLM-Omni's "
                 "tile-parallel VAE) is not supported in this build; use model_config.vae_parallel"
             )
-        # The prompt bucket: the prefill graph is compiled for this length and every
-        # prompt is right-padded to it.
+        # Prompt buckets (prefill_len, prefill_buckets); a request sets the one it fits.
         self.prefill_len = int(model_config.get("prefill_len", default_prefill_len()))
+        self._prefill_buckets = _prompt_buckets(model_config)
         self.vae_dtype = getattr(torch, str(model_config.get("vae_dtype", "float32")))
         # Where the output rank decodes. `cpu` is the float32 reference; `neuron` puts the
         # decoder on device in 16 bits (vae_device_dtype) with fp32 reductions.
@@ -548,6 +548,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         ]
         kwargs.setdefault("fullgraph", True)
         kwargs.setdefault("dynamic", False)
+        # Kept for the graphs built on first use (the AR decode step, the bounded prefill).
+        self._compile_settings = (args, options, kwargs)
         self.model.compile(*args, options=options, **kwargs)
         self._compiled_denoise_step = torch.compile(
             self._denoise_step_graph,
@@ -637,18 +639,23 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
 
         return build(timestep_row), build(image_row)
 
-    def _prompt_inputs(self, input_ids: torch.Tensor, cos, sin, prompt_len: int):
+    def _prompt_inputs(self, input_ids: torch.Tensor, cos, sin, prompt_len: int, cond_tokens=None):
         """Right-pad the prompt to ``prefill_len`` and build its embeddings and RoPE.
 
         Right-padding is safe because the prefill attends causally: the padded tail
         cannot influence any real prompt position. The pad columns are then masked out
-        of every denoise step by the key biases.
+        of every denoise step by the key biases. ``cond_tokens`` is
+        :meth:`_cond_image_tokens`'s ``(positions, values)``, written over the
+        conditioning images' placeholders.
         """
         bsz = input_ids.shape[0]
         pad_id = int(getattr(self.hf_config, "pad_token_id", 0) or 0)
         padded_ids = torch.full((bsz, self.prefill_len), pad_id, dtype=torch.long)
         padded_ids[:, :prompt_len] = input_ids[:, :prompt_len].cpu()
         embeds = self.wte(padded_ids).to(dtype=self.model.dtype)
+        if cond_tokens is not None:
+            positions, values = cond_tokens
+            embeds[:, positions] = values.to(embeds.dtype)
 
         pad_cos = torch.zeros((bsz, self.prefill_len, cos.shape[-1]), dtype=torch.float32)
         pad_sin = torch.zeros((bsz, self.prefill_len, sin.shape[-1]), dtype=torch.float32)
@@ -690,26 +697,14 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             bot_task = dict(self.od_config.model_config or {}).get("bot_task")
         return bot_task
 
-    def _check_request(
-        self, *, bot_task, cot_text_list, height, width, guidance, cond_images=None
-    ) -> None:
-        """Reject what this text-to-image build does not run, before any device work."""
+    def _check_request(self, *, bot_task, height, width, guidance) -> None:
+        """Reject what this build does not run, before any device work."""
         if isinstance(bot_task, str) and bot_task.lower() == "none":
             bot_task = None
         if bot_task not in SUPPORTED_BOT_TASKS:
             raise NotImplementedError(
                 f"HunyuanImage3 on Neuron: bot_task {bot_task!r} is not supported; this build "
-                "runs text-to-image only (bot_task 'image', no think / recaption)"
-            )
-        if any(text is not None for text in cot_text_list):
-            raise NotImplementedError(
-                "HunyuanImage3 on Neuron: think / recaption text from an AR stage is not "
-                "supported; this build runs text-to-image only"
-            )
-        if cond_images and any(cond_images):
-            raise NotImplementedError(
-                "HunyuanImage3 on Neuron: conditioning images (image editing) are not "
-                "supported; this build runs text-to-image only"
+                f"runs {', '.join(repr(task) for task in SUPPORTED_BOT_TASKS[1:])}"
             )
         if (int(height), int(width)) != SUPPORTED_SIZE:
             raise ValueError(
@@ -734,7 +729,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         generator=None,
         **kwargs,
     ) -> DiffusionOutput:
-        """Generate one image: prefill the prompt once, then replay the denoise NEFF."""
+        """Generate one image: think / recaption first if asked, prefill the prompt once,
+        then replay the denoise NEFF."""
         del kwargs
         # The engine's warmup request runs at its own resolution (512x512), which is a
         # different compiled shape than the one real requests use, so honouring it would
@@ -762,6 +758,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             req.prompts, extra_args, request_id=req.request_id, allow_cond_image=True
         )
         prompt = prompt_from_req or prompt
+        # A request's conditioning tokens are computed once and shared by its AR and DiT.
+        self._cond_values_cache = None
         generator = sampling.generator or generator
         if generator is None:
             # Keep RNG on the host: torch.Generator(<neuron device>) is unsupported, and
@@ -780,18 +778,50 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             guidance = float(guidance_scale)
         else:
             guidance = float(self.generation_config.diff_guidance_scale)
-        self._check_request(
-            bot_task=self._request_bot_task(req, extra_args),
-            cot_text_list=cot_text_list,
-            cond_images=batch_cond_image_info,
-            height=height,
-            width=width,
-            guidance=guidance,
+        bot_task = self._request_bot_task(req, extra_args)
+        self._check_request(bot_task=bot_task, height=height, width=width, guidance=guidance)
+
+        self._ar_stats = None
+        from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_ar import (
+            AR_BOT_TASKS,
+        )
+
+        if bot_task in AR_BOT_TASKS and not any(text is not None for text in cot_text_list):
+            # Think / recaption on the same backbone first; the DiT then conditions on the
+            # text, as upstream's ar2diffusion hands it over (bot_task back to auto).
+            if batch_cond_image_info:
+                self._ar_stats = self._generate_text_conditioned(
+                    prompt, system_prompt, bot_task, batch_cond_image_info, generator
+                )
+            else:
+                text_prompt = prompt[0] if isinstance(prompt, list) else prompt
+                self._ar_stats = self._ar_generator().generate(text_prompt, bot_task, system_prompt)
+            if self.model.cfg_size > 1:
+                # Each CFG replica decodes on its own; the DiT prompt must be the same on
+                # every rank, so everyone takes rank 0's text.
+                self._ar_stats = _broadcast_from_rank0(self._ar_stats)
+            if self.is_output_rank:
+                logger.info(
+                    "HunyuanImage3 AR (%s): %d prompt + %d generated tokens, %.2f s decode, "
+                    "%s s/token: %r",
+                    bot_task,
+                    self._ar_stats["prompt_tokens"],
+                    self._ar_stats["generated_tokens"],
+                    self._ar_stats["decode_seconds"],
+                    self._ar_stats["seconds_per_token"],
+                    self._ar_stats["text"][:2000],
+                )
+            cot_text_list = [self._ar_stats["text"]]
+            tokenizer_bot_task = "auto"
+        cot_text = (
+            [self._normalize_cot_text(text) for text in cot_text_list]
+            if any(text is not None for text in cot_text_list)
+            else None
         )
 
         model_inputs = self.prepare_model_inputs(
             prompt=prompt,
-            cot_text=None,
+            cot_text=cot_text,
             system_prompt=system_prompt,
             mode="gen_image",
             generator=generator,
@@ -799,6 +829,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             num_inference_steps=steps,
             guidance_scale=guidance,
             bot_task=tokenizer_bot_task,
+            batch_cond_image_info=batch_cond_image_info,
             # Everything the templating path builds (ids, RoPE tables, masks) stays on
             # the host; this pipeline moves only the graph inputs to the device.
             device=torch.device("cpu"),
@@ -806,8 +837,54 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
 
         image = self._generate_image(model_inputs, steps=steps, guidance=guidance)
         elapsed = time.perf_counter() - start
+        custom_output = {}
+        if any(text is not None for text in cot_text_list):
+            custom_output["ar_generated_text"] = cot_text_list[0]
         self._record_perf_metrics(steps=steps, height=height, width=width, e2e=elapsed)
-        return DiffusionOutput(output=image)
+        return DiffusionOutput(output=image, custom_output=custom_output)
+
+    def _generate_text_conditioned(
+        self, prompt, system_prompt, bot_task: str, batch_cond_image_info, generator
+    ) -> dict:
+        """Think / recaption over the prompt *and* its conditioning images.
+
+        As the official ``generate_image`` runs image editing with reasoning: the unified
+        system prompt unless the request names one, then the text over the "gen_text"
+        template, which carries each image's VAE and ViT tokens.
+        """
+        if system_prompt is None:
+            from vllm_omni.diffusion.models.hunyuan_image3.system_prompt import (
+                get_system_prompt,
+            )
+
+            system_prompt = (get_system_prompt("en_unified", bot_task, None) or "").strip()
+        ar_inputs = self.prepare_model_inputs(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            mode="gen_text",
+            bot_task=bot_task.split("_")[0],
+            generator=generator,
+            batch_cond_image_info=batch_cond_image_info,
+            device=torch.device("cpu"),
+        )
+        cond_tokens = self._cond_image_tokens(ar_inputs, generator)
+        return self._ar_generator().generate_conditioned(ar_inputs, bot_task, cond_tokens)
+
+    def _ar_generator(self):
+        """The think / recaption generator, built on the first AR request. Every rank."""
+        if getattr(self, "_ar", None) is None:
+            from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_ar import (
+                NeuronHunyuanImage3AR,
+            )
+
+            model_config = dict(self.od_config.model_config or {})
+            self._ar = NeuronHunyuanImage3AR(
+                self,
+                self._resolve_model_path(),
+                max_new_tokens=int(model_config.get("ar_max_new_tokens", 1024)),
+                compile_kwargs=getattr(self, "_compile_settings", None),
+            )
+        return self._ar
 
     def _generate_image(self, model_inputs: dict[str, Any], *, steps: int, guidance: float):
         config = self.hf_config
@@ -823,11 +900,8 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 "to match across the CFG batch."
             )
         prompt_len = int(prompt_lens[0].item())
-        if prompt_len > self.prefill_len:
-            raise ValueError(
-                f"Prompt needs {prompt_len} tokens but the prompt bucket is {self.prefill_len}; "
-                "raise engine_args.model_config.prefill_len (one more prefill and denoise compile)."
-            )
+        # The smallest prompt bucket the prompt fits (prefill_buckets), for this request.
+        self.prefill_len = self._prefill_bucket(prompt_len)
 
         attention_mask = self._prepare_attention_mask_for_generation(
             input_ids, self.generation_config, model_kwargs=model_inputs
@@ -855,11 +929,23 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
                 return tensor
             return tensor[branch : branch + 1]
 
+        # Conditioning images: their tokens over the placeholders (already computed when
+        # the AR ran over the same images), and a prefill with full attention inside
+        # each image block.
+        cond_start = time.perf_counter()
+        conditioned = model_inputs.get("cond_vae_image_mask") is not None
+        cond_tokens = self._cond_image_tokens(model_inputs, generator) if conditioned else None
+        cond_seconds = time.perf_counter() - cond_start
+
         prefill_start = time.perf_counter()
         prompt_embeds, prompt_cos, prompt_sin = self._prompt_inputs(
-            rows(input_ids), rows(cos), rows(sin), prompt_len
+            rows(input_ids), rows(cos), rows(sin), prompt_len, cond_tokens
         )
-        prompt_kv = self.model.run_prefill(prompt_embeds, prompt_cos, prompt_sin)
+        if conditioned:
+            bound = self._prefill_bounds(attention_mask, prompt_len)
+            prompt_kv = self._run_prefill_bounded(prompt_embeds, prompt_cos, prompt_sin, bound)
+        else:
+            prompt_kv = self.model.run_prefill(prompt_embeds, prompt_cos, prompt_sin)
         prefill_seconds = time.perf_counter() - prefill_start
 
         step_cos, step_sin = self._denoise_rope(rows(cos), rows(sin), rows(image_mask), prompt_len)
@@ -934,6 +1020,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         else:
             image = self._decode(latents, generator) if self.is_output_rank else None
         self._stage_seconds = {
+            "cond_image_seconds": cond_seconds if conditioned else None,
             "prefill_seconds": prefill_seconds,
             "denoise_seconds": denoise_seconds,
             "vae_decode_seconds": time.perf_counter() - decode_start,
@@ -1060,6 +1147,351 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         )
         return images[0]
 
+    # ---- prompt buckets and conditioning images (image editing / IT2I) -------
+
+    def _prefill_bucket(self, prompt_len: int) -> int:
+        """The smallest prompt bucket that fits: ``prefill_len`` or one of ``prefill_buckets``.
+
+        Each bucket is its own prefill and denoise graphs, so a short text prompt keeps
+        its 512 bucket while a prompt carrying a conditioning image (~4096 VAE + up to
+        1024 ViT tokens at 1024x1024) takes a larger one.
+        """
+        for bucket in self._prefill_buckets:
+            if prompt_len <= bucket:
+                return bucket
+        raise ValueError(
+            f"Prompt needs {prompt_len} tokens but the largest prompt bucket is "
+            f"{self._prefill_buckets[-1]}. "
+            "Add a larger one to engine_args.model_config.prefill_buckets (one more prefill "
+            "and denoise compile)."
+        )
+
+    def _prefill_bounds(self, attention_mask: torch.Tensor, prompt_len: int) -> torch.Tensor:
+        """``[prefill_len]`` float32: prompt query ``i`` sees prompt keys ``[0, bound[i])``.
+
+        Upstream's generation mask is causal with full attention inside each image block
+        (``joint_full`` for conditioning images), so every prompt row is a prefix of the
+        prompt -- checked here, along with the CFG branches agreeing. Padding rows stay
+        causal; their keys are masked out of every later step by the key biases.
+        """
+        prompt = attention_mask[:, 0, :prompt_len, :prompt_len].bool().cpu()
+        if not bool(torch.all(prompt == prompt[:1])):
+            raise ValueError("The CFG branches must share the prompt's attention pattern.")
+        rows = prompt[0]
+        bound = rows.sum(dim=-1)
+        prefix = torch.arange(prompt_len).reshape(1, -1) < bound.reshape(-1, 1)
+        if not bool(torch.all(rows == prefix)) or bool(
+            attention_mask[0, 0, :prompt_len, prompt_len:].any()
+        ):
+            raise ValueError(
+                "The Neuron HunyuanImage3 prefill needs every prompt token to attend to a "
+                "prefix of the prompt (causal text, full-attention image blocks)."
+            )
+        full = torch.arange(1, self.prefill_len + 1, dtype=torch.float32)
+        full[:prompt_len] = bound.to(torch.float32)
+        widened = (bound > torch.arange(1, prompt_len + 1)).nonzero().flatten()
+        if widened.numel():
+            logger.info(
+                "HunyuanImage3 prefill bounds: %d of %d prompt rows see past themselves, rows "
+                "%d..%d, bounds %s",
+                widened.numel(),
+                prompt_len,
+                int(widened[0]),
+                int(widened[-1]),
+                sorted(set(bound[widened].tolist()))[:8],
+            )
+        return full.to(self.device)
+
+    def _prefill_bounded_graph(self, inputs_embeds, cos, sin, bound):
+        """The prompt prefill with per-query key bounds (:func:`forward_prefill_bounded`)."""
+        from vllm_omni_neuron.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import (
+            forward_prefill_bounded,
+        )
+
+        return forward_prefill_bounded(self.model, inputs_embeds, cos, sin, bound)
+
+    def _run_prefill_bounded(self, inputs_embeds, cos, sin, bound):
+        if getattr(self, "_compiled_prefill_bounded", None) is None:
+            settings = getattr(self, "_compile_settings", None)
+            fn = self._prefill_bounded_graph
+            if settings is not None:
+                args, options, kwargs = settings
+                fn = torch.compile(
+                    fn,
+                    *args,
+                    options={**options, "model_name": "hunyuan_image3_prefill_bounded"},
+                    **kwargs,
+                )
+            self._compiled_prefill_bounded = fn
+        return self._compiled_prefill_bounded(inputs_embeds, cos, sin, bound)
+
+    def _encode_cond_image(self, batch_cond_image_info_list, cfg_factor: int = 1, generator=None):
+        """Defer upstream's per-rank encode: return the preprocessed pixels, unencoded.
+
+        ``prepare_model_inputs`` runs on every rank; :meth:`_cond_image_tokens` encodes
+        the images once, on rank 0. The CFG branches share them, so only row 0 is kept.
+        """
+        del cfg_factor, generator
+        infos = batch_cond_image_info_list[0]
+        pixels = [info.vae_image_info.image_tensor for info in infos]
+        vit = torch.cat([info.vision_image_info.image_tensor for info in infos], dim=0)
+        return pixels, None, [vit]
+
+    def _cond_image_tokens(self, model_inputs: dict[str, Any], generator):
+        """``(positions, values)`` of the conditioning images' tokens in the prompt.
+
+        In prompt order: each image's VAE tokens (patch embed of its latents at t=0),
+        its timestep token, then each image's SigLIP2 tokens (through the aligner), at
+        the placeholders upstream's template marks. Rank 0 computes them on the host and
+        every rank receives them over gloo: they are the same for both CFG branches, and
+        32 single-threaded ranks recomputing them would take minutes.
+        """
+        masks = {
+            key: model_inputs[key].cpu()
+            for key in ("cond_vae_image_mask", "cond_vit_image_mask", "cond_timestep_scatter_index")
+        }
+        for key, mask in masks.items():
+            if not bool(torch.all(mask == mask[:1])):
+                raise ValueError(f"The CFG branches must share the conditioning layout ({key}).")
+        vae_positions = masks["cond_vae_image_mask"][0].nonzero().flatten()
+        timestep_positions = masks["cond_timestep_scatter_index"][0].flatten().long()
+        vit_positions = masks["cond_vit_image_mask"][0].nonzero().flatten()
+        hidden = int(self.hf_config.hidden_size)
+        counts = (vae_positions.numel(), timestep_positions.numel(), vit_positions.numel())
+        positions = torch.cat((vae_positions, timestep_positions, vit_positions))
+        key = (tuple(id(pixels) for pixels in model_inputs["cond_vae_images"]), counts)
+        cached = getattr(self, "_cond_values_cache", None)
+        if cached is not None and cached[0] == key:
+            return positions, cached[1]
+        values = torch.empty((sum(counts), hidden), dtype=torch.float32)
+
+        distributed = torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1
+        me = torch.distributed.get_rank() if distributed else 0
+        encode_rank = self._vae_encode_rank()
+        source = encode_rank if encode_rank is not None else 0
+        moments = None
+        if me == encode_rank:
+            # This rank encodes on its own core, then builds the tokens for everyone.
+            start = time.perf_counter()
+            moments = [self._device_encoder().encode(p) for p in model_inputs["cond_vae_images"]]
+            encode_seconds = time.perf_counter() - start
+        if me == source:
+            start = time.perf_counter()
+            values = self._compute_cond_tokens(model_inputs, generator, counts, moments)
+            if moments is not None:
+                logger.info("HunyuanImage3: device VAE encode in %.2fs", encode_seconds)
+            logger.info(
+                "HunyuanImage3: %d conditioning image(s), %d VAE + %d timestep + %d ViT tokens "
+                "on the host in %.1fs",
+                len(model_inputs["cond_vae_images"]),
+                *counts,
+                time.perf_counter() - start,
+            )
+        if distributed:
+            from vllm_omni.diffusion.distributed.parallel_state import get_world_group
+
+            torch.distributed.broadcast(values, src=source, group=get_world_group().cpu_group)
+        self._cond_values_cache = (key, values)
+        return positions, values
+
+    def _compute_cond_tokens(self, model_inputs, generator, counts, moments=None) -> torch.Tensor:
+        """The conditioning tokens, float32, on the host (the source rank only).
+
+        ``moments`` are the device encoder's posterior moments per image; without them
+        the host VAE encodes.
+        """
+        clock = time.perf_counter()
+        modules = self._host_cond_modules()
+        timings = {"modules": time.perf_counter() - clock}
+        hidden = int(self.hf_config.hidden_size)
+        previous_threads = torch.get_num_threads()
+        cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (
+            os.cpu_count() or 1
+        )
+        torch.set_num_threads(max(1, cpus))
+        # The VAE sample draws from a copy of the request's generator, so every rank's
+        # generator -- and with it the initial latents -- stays in the same state.
+        source = generator[0] if isinstance(generator, list) else generator
+        sample_generator = torch.Generator("cpu")
+        sample_generator.set_state(source.get_state())
+        try:
+            with torch.no_grad():
+                config = self.vae.config
+                vae_tokens = []
+                for index, pixels in enumerate(model_inputs["cond_vae_images"]):
+                    clock = time.perf_counter()
+                    if moments is not None:
+                        from vllm_omni.diffusion.models.hunyuan_image3.autoencoder import (
+                            DiagonalGaussianDistribution,
+                        )
+
+                        encoded = DiagonalGaussianDistribution(moments[index])
+                    else:
+                        image = pixels.cpu().to(self.vae_dtype).reshape(1, *pixels.shape[-3:])
+                        encoded = self.vae.encode(image.unsqueeze(2)).latent_dist
+                    timings["vae_encode"] = (
+                        timings.get("vae_encode", 0.0) + time.perf_counter() - clock
+                    )
+                    latents = encoded.sample(sample_generator).float()
+                    if getattr(config, "shift_factor", None):
+                        latents = latents - config.shift_factor
+                    if getattr(config, "scaling_factor", None):
+                        latents = latents * config.scaling_factor
+                    latents = latents.squeeze(2)
+                    clock = time.perf_counter()
+                    t_emb = modules["time_embed"](torch.zeros(1))
+                    tokens, _, _ = _unet_down_tokens(modules["patch_embed"], latents, t_emb)
+                    timings["patch_embed"] = (
+                        timings.get("patch_embed", 0.0) + time.perf_counter() - clock
+                    )
+                    vae_tokens.append(tokens.reshape(-1, hidden))
+                timestep_tokens = modules["timestep_emb"](torch.zeros(counts[1]))
+                timestep_tokens = timestep_tokens.reshape(-1, hidden)
+
+                clock = time.perf_counter()
+                vit_images = model_inputs["cond_vit_images"][0].cpu().float()
+                vit_kwargs = model_inputs["vit_kwargs"]
+                attention_mask = vit_kwargs["attention_mask"][0].cpu()
+                spatial_shapes = vit_kwargs["spatial_shapes"][0].cpu()
+                features = modules["vision"](
+                    pixel_values=vit_images,
+                    pixel_attention_mask=attention_mask,
+                    spatial_shapes=spatial_shapes,
+                ).last_hidden_state
+                # Upstream's packed encoder leaves padding patches at zero.
+                features = features * attention_mask.unsqueeze(-1).to(features.dtype)
+                vit_tokens = modules["aligner"](features).reshape(-1, hidden)
+                timings["vit"] = time.perf_counter() - clock
+            values = torch.cat((*vae_tokens, timestep_tokens, vit_tokens)).float()
+        finally:
+            torch.set_num_threads(previous_threads)
+        logger.info(
+            "HunyuanImage3 conditioning tokens on the host (%d threads): %s",
+            max(1, cpus),
+            {k: round(v, 2) for k, v in timings.items()},
+        )
+        if values.shape[0] != sum(counts):
+            raise ValueError(
+                f"Conditioning tokens {values.shape[0]} do not match the template's {sum(counts)} "
+                f"placeholders (VAE/timestep/ViT {counts})."
+            )
+        return values
+
+    def _vae_encode_rank(self) -> int | None:
+        """The rank that encodes conditioning images on device, or ``None`` for the host.
+
+        ``model_config.vae_encode_device: neuron`` (the default with a device VAE) runs
+        the whole encoder on one rank's core, beside its backbone shard: rank
+        ``vae_encode_rank``, by default the first rank the split decode leaves alone
+        (rank 2 with ``vae_parallel: 2``). One core, no collectives: a device group
+        without global rank 0 cannot bootstrap while rank 0 is idle, which is what
+        ruled out splitting the encode over ranks 2 and 3 the way the decode is split.
+        """
+        parts, _ = self._vae_split()
+        model_config = dict(self.od_config.model_config or {})
+        device = str(model_config.get("vae_encode_device", "neuron"))
+        if device not in ("neuron", "cpu"):
+            raise ValueError(f"vae_encode_device must be 'neuron' or 'cpu', got {device!r}")
+        world = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        rank = int(model_config.get("vae_encode_rank", parts if parts > 1 else 0))
+        if device == "cpu" or self.vae_device != "neuron" or rank >= world:
+            return None
+        return rank
+
+    def _device_encoder(self):
+        """The device VAE encoder on this rank's core, built on its first image request."""
+        if getattr(self, "_device_vae_encoder", None) is None:
+            from vllm_omni_neuron.diffusion.models.hunyuan_image3.vae_device import (
+                StagedDeviceEncoder,
+            )
+
+            model_config = dict(self.od_config.model_config or {})
+            dtype = getattr(torch, str(model_config.get("vae_device_dtype", "float16")))
+            self._device_vae_encoder = StagedDeviceEncoder(
+                self.vae, self.hf_config.vae, self.device, dtype
+            )
+        return self._device_vae_encoder
+
+    def _host_cond_modules(self) -> dict:
+        """Float32 host copies for the conditioning path, built on the first image request.
+
+        SigLIP2 is transformers' ``Siglip2VisionModel`` (the checkpoint's
+        ``vision_model.*`` uses its names) and the aligner the checkpoint's
+        Linear-GELU-Linear; the timestep embedders are copied back from the device and
+        the patch embed is the host module the UNet split was sliced from.
+        """
+        if getattr(self, "_cond_modules", None) is None:
+            import copy
+
+            from safetensors import safe_open
+            from transformers import Siglip2VisionConfig, Siglip2VisionModel
+
+            config = self.hf_config
+            vit_config = (
+                config.vit.to_dict() if hasattr(config.vit, "to_dict") else dict(config.vit)
+            )
+            architecture = (
+                "hidden_size",
+                "intermediate_size",
+                "num_hidden_layers",
+                "num_attention_heads",
+                "num_channels",
+                "num_patches",
+                "patch_size",
+                "hidden_act",
+                "layer_norm_eps",
+                "attention_dropout",
+            )
+            vision = Siglip2VisionModel(
+                Siglip2VisionConfig(**{k: vit_config[k] for k in architecture if k in vit_config})
+            )
+            aligner_config = config.vit_aligner
+            if not isinstance(aligner_config, dict):
+                aligner_config = vars(aligner_config)
+            if (
+                aligner_config.get("projector_type") != "mlp_gelu"
+                or int(aligner_config.get("depth", 2)) != 2
+            ):
+                raise ValueError(f"Unsupported vit_aligner {aligner_config}")
+            width, hidden = int(aligner_config["input_dim"]), int(aligner_config["n_embed"])
+            aligner = nn.Sequential(nn.Linear(width, hidden), nn.GELU(), nn.Linear(hidden, hidden))
+
+            model_path = self._resolve_model_path()
+            with open(os.path.join(model_path, "model.safetensors.index.json")) as handle:
+                weight_map = json.load(handle)["weight_map"]
+            targets = {}
+            for prefix, module in (("vision_model.", vision), ("vision_aligner.layers.", aligner)):
+                for name in module.state_dict():
+                    targets[prefix + name] = (module, name)
+            state = {id(vision): {}, id(aligner): {}}
+            files: dict[str, list[str]] = {}
+            for key in targets:
+                if key not in weight_map:
+                    raise KeyError(f"conditioning weight {key} missing from the checkpoint")
+                files.setdefault(weight_map[key], []).append(key)
+            for filename, keys in files.items():
+                path = os.path.join(model_path, filename)
+                with safe_open(path, framework="pt", device="cpu") as f:
+                    for key in keys:
+                        module, name = targets[key]
+                        state[id(module)][name] = f.get_tensor(key).float()
+            vision.load_state_dict(state[id(vision)], strict=True)
+            aligner.load_state_dict(state[id(aligner)], strict=True)
+
+            def host_copy(module):
+                host = TimestepEmbedder(hidden_size=int(config.hidden_size))
+                host.load_state_dict({k: v.cpu().float() for k, v in module.state_dict().items()})
+                return host.eval()
+
+            self.__dict__["_cond_modules"] = {
+                "vision": vision.eval(),
+                "aligner": aligner.eval(),
+                "time_embed": host_copy(self.time_embed),
+                "timestep_emb": host_copy(self.timestep_emb),
+                "patch_embed": copy.deepcopy(self.patch_embed).float().eval(),
+            }
+        return self._cond_modules
+
     def _vae_split(self) -> tuple[int, int | None]:
         """``(parts, this rank's part or None)`` for ``model_config.vae_parallel``.
 
@@ -1094,6 +1526,7 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
         stages = self._stage_seconds or {}
         denoise = stages.get("denoise_seconds") or 0.0
         metrics = {
+            "cond_image_seconds": stages.get("cond_image_seconds"),
             "prefill_seconds": stages.get("prefill_seconds"),
             "denoise_seconds": denoise,
             "vae_decode_seconds": stages.get("vae_decode_seconds"),
@@ -1106,6 +1539,16 @@ class NeuronHunyuanImage3Pipeline(HunyuanImage3Pipeline):
             "vae_device": self.vae_device,
             "lite_runtime": is_lite_runtime(),
         }
+        ar = getattr(self, "_ar_stats", None)
+        if ar is not None:
+            metrics.update(
+                ar_prompt_tokens=ar["prompt_tokens"],
+                ar_generated_tokens=ar["generated_tokens"],
+                ar_prefill_seconds=ar["prefill_seconds"],
+                ar_decode_seconds=ar["decode_seconds"],
+                ar_seconds_per_token=ar["seconds_per_token"],
+                ar_stopped=ar["stopped"],
+            )
         self._last_perf_metrics = metrics
         if not self.is_output_rank:
             return
@@ -1176,3 +1619,18 @@ def _check_model_config(model_config: dict) -> None:
                 f"HunyuanImage3 on Neuron: model_config.{key} ({feature}) is not supported "
                 "in this build; remove it from the stage config"
             )
+
+
+def _broadcast_from_rank0(value):
+    """``value`` as rank 0 has it, on every rank (host-side, over the world gloo group)."""
+    from vllm_omni.diffusion.distributed.parallel_state import get_world_group
+
+    holder = [value]
+    torch.distributed.broadcast_object_list(holder, src=0, group=get_world_group().cpu_group)
+    return holder[0]
+
+
+def _prompt_buckets(model_config: dict) -> list[int]:
+    """The prompt buckets, ascending: ``prefill_len`` and every ``prefill_buckets`` entry."""
+    prefill_len = int(model_config.get("prefill_len", default_prefill_len()))
+    return sorted({prefill_len, *(int(b) for b in model_config.get("prefill_buckets") or [])})
