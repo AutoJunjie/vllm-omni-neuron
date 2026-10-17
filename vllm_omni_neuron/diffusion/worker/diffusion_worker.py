@@ -21,6 +21,9 @@ from vllm_omni_neuron.diffusion.distributed.parallel_state import override_group
 from vllm_omni_neuron.lite_compat import initialize as initialize_lite
 from vllm_omni_neuron.lite_compat import is_lite_runtime
 
+# vllm-neuron's reservation for NEURON_RT_ROOT_COMM_ID (vllm_neuron/utils/executor.py).
+_ROOT_COMM_BASE_PORT = 61234
+
 
 def _limit_lite_worker_threads() -> None:
     """Keep one Lite worker per NeuronCore from oversubscribing the host."""
@@ -89,7 +92,19 @@ class NeuronDiffusionWorker(DiffusionWorker, NeuronWorker):
                 NeuronPlatform.set_device_count(len(visible_devices))
                 os.environ["NEURON_RT_VISIBLE_CORES"] = str(visible_devices[self.local_rank])
                 os.environ.pop("NEURON_LIBRARY_PATH", None)
-                os.environ.pop("NEURON_RT_ROOT_COMM_ID", None)
+                # Pin the CCOM root to a port outside the kernel's ephemeral range. Left
+                # unset, the Lite backend has rank 0 pick one with get_free_port() and
+                # release it, and only binds it at the first collective; meanwhile the same
+                # process opens ~20 listening sockets of its own (TCPStore, gloo) from that
+                # range, and when one lands on the port the bind fails with EADDRINUSE and
+                # every other rank waits on the root forever -- 3 of 9 starts on one trn2
+                # node. vllm-neuron reserves 61234 + core for this, and keying on the
+                # stage's first core keeps two servers on disjoint cores apart. A pin the
+                # caller already set is kept, as vllm-neuron's worker does.
+                os.environ.setdefault(
+                    "NEURON_RT_ROOT_COMM_ID",
+                    f"localhost:{_ROOT_COMM_BASE_PORT + int(visible_devices[0])}",
+                )
                 # Also sets TORCH_NEURONX_VOCAB_SHARDING_SPMD_DISABLE; see initialize().
                 initialize_lite()
 
