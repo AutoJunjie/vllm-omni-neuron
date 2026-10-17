@@ -1,0 +1,41 @@
+..................................................                       [100%]
+=============================== warnings summary ===============================
+../../opt/conda/lib/python3.13/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/conda/lib/python3.13/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../opt/conda/lib/python3.13/site-packages/vllm_neuron/functional/moe/moe_cte.py:677
+  /opt/conda/lib/python3.13/site-packages/vllm_neuron/functional/moe/moe_cte.py:677: DeprecationWarning: nki.jit 'mode' parameter is deprecated, and its value is ignored.
+    @nki.jit(mode="trace")
+
+../../opt/conda/lib/python3.13/site-packages/vllm_neuron/functional/moe/moe_cte.py:766
+  /opt/conda/lib/python3.13/site-packages/vllm_neuron/functional/moe/moe_cte.py:766: DeprecationWarning: nki.jit 'mode' parameter is deprecated, and its value is ignored.
+    @nki.jit(mode="trace")
+
+test/unit/test_hunyuan_image3_bounded_prefill.py::test_bounded_prefill_matches_masked_reference
+  /opt/conda/lib/python3.13/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2383: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    a_major_mode: tcgen05.OperandMajorMode,
+
+test/unit/test_hunyuan_image3_bounded_prefill.py::test_bounded_prefill_matches_masked_reference
+  /opt/conda/lib/python3.13/site-packages/flashinfer/gemm/kernels/grouped_gemm_masked_blackwell.py:2385: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    b_major_mode: tcgen05.OperandMajorMode,
+
+test/unit/test_hunyuan_image3_bounded_prefill.py::test_bounded_prefill_matches_masked_reference
+test/unit/test_hunyuan_image3_bounded_prefill.py::test_bounded_prefill_matches_masked_reference
+  /opt/conda/lib/python3.13/site-packages/flashinfer/gdn_kernels/blackwell/gated_delta_net_chunked.py:99: DeprecationWarning: tcgen05.OperandMajorMode is deprecated, use cute.nvgpu.OperandMajorMode instead
+    from cutlass.cute.nvgpu.tcgen05 import OperandMajorMode
+
+test/unit/test_hunyuan_image3_unet_parallel.py::test_split_matches_replicated_tp32
+test/unit/test_hunyuan_image3_unet_parallel.py::test_split_matches_replicated_tp8
+test/unit/test_hunyuan_image3_vae_device.py::test_stages_compose_to_the_decoder
+test/unit/test_hunyuan_image3_vae_device.py::test_fp32_reductions_match_the_reference_in_float32
+test/unit/test_hunyuan_image3_vae_device.py::test_float16_norm_survives_activations_past_256
+test/unit/test_hunyuan_image3_vae_nki_conv.py::test_pack_is_exact_without_splitting
+test/unit/test_hunyuan_image3_vae_nki_conv.py::test_split_is_exact_for_the_upsample_bank
+test/unit/test_hunyuan_image3_vae_nki_conv.py::test_group_boundaries_follow_the_bias
+  /opt/conda/lib/python3.13/site-packages/torch/random.py:42: UserWarning: Set seed for `neuron` device does not take effect, please add API's `_is_in_bad_fork` and `manual_seed_all` to `neuron` device module.
+    return _manual_seed_impl(seed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+50 passed, 28 warnings in 84.23s (0:01:24)
+__EXIT=0

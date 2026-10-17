@@ -1,0 +1,30 @@
+Loading requests...
+Prepared 8 requests from random dataset.
+  0%|          | 0/8 [00:00<?, ?it/s] 12%|█▎        | 1/8 [00:23<02:41, 23.03s/it] 25%|██▌       | 2/8 [00:42<02:06, 21.16s/it] 38%|███▊      | 3/8 [01:02<01:42, 20.58s/it] 50%|█████     | 4/8 [01:22<01:21, 20.40s/it] 62%|██████▎   | 5/8 [01:42<01:00, 20.25s/it] 75%|███████▌  | 6/8 [02:02<00:40, 20.20s/it] 88%|████████▊ | 7/8 [02:22<00:20, 20.05s/it]100%|██████████| 8/8 [02:42<00:00, 20.03s/it]100%|██████████| 8/8 [02:42<00:00, 20.34s/it]
+Running 1 warmup request(s) with num_inference_steps=2 and warmup_concurrency=1...
+
+============ Serving Benchmark Result ============
+Endpoint:                                /v1/chat/completions
+Model:                                   default        
+Dataset:                                 random         
+Task:                                    t2i            
+--------------------------------------------------
+Benchmark duration (s):                  159.81         
+Request rate:                            inf            
+Max request concurrency:                 1              
+Successful requests:                     8/8              
+--------------------------------------------------
+Request throughput (req/s):              0.05           
+Latency Mean (s):                        19.9756        
+Latency Median (s):                      19.9906        
+Latency P99 (s):                         20.1283        
+Latency P95 (s):                         20.1277        
+--------------------------------------------------
+Stage Durations Mean (s):
+  queue_wait_ms:                         0.2462         
+  stage_0_gen_ms:                        19444.2176     
+
+============================================================
+Metrics saved to /workspace/out/pr5v3/benchmark.json
+wrote /workspace/out/pr5v3/benchmark.json
+__EXIT=0

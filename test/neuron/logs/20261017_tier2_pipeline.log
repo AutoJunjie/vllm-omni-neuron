@@ -1,0 +1,57 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspace/plugin
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collected 1 item
+
+test/neuron/test_hunyuan_image3_pipeline_accuracy.py 2026-10-17 03:31:23,017 - WARNING - runtime.py:70 - Defaulting to PJRT_DEVICE=CPU
+INFO 10-17 03:31:23 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 10-17 03:31:23 [__init__.py:46] - neuron -> vllm_neuron:register
+INFO 10-17 03:31:23 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 10-17 03:31:23 [__init__.py:237] Platform plugin neuron is activated
+2026-10-17 03:31:23,368 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-17 03:31:23,368 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-17 03:38:34,651 - INFO - testing.py:434 - 
+✓ PASS step 0 pred_raw
+  L-inf: base=0.070784  tgt=0.062712  ratio=0.89x
+  L2/σ:  base=0.028771  tgt=0.028494  ratio=0.99x
+  σ-ratio: 0.990  BC: 0.9999
+2026-10-17 03:38:34,651 - INFO - testing.py:434 - 
+✓ PASS step 0 pred_raw
+  L-inf: base=0.070784  tgt=0.062712  ratio=0.89x
+  L2/σ:  base=0.028771  tgt=0.028494  ratio=0.99x
+  σ-ratio: 0.990  BC: 0.9999
+2026-10-17 03:38:34,658 - INFO - testing.py:434 - 
+✓ PASS step 0 pred
+  L-inf: base=0.053461  tgt=0.051016  ratio=0.95x
+  L2/σ:  base=0.038147  tgt=0.037446  ratio=0.98x
+  σ-ratio: 0.982  BC: 0.9997
+step 0 pred_raw: ThreeWayAssertResult(passed=True, name='step 0 pred_raw', base_linf=0.07078370758567988, tgt_linf=0.0627115936831304, base_l2=0.028771092164166106, tgt_l2=0.028494268573255554, linf_ratio=0.8859608492140847, l2_ratio=0.990378412146087, sigma_ratio=np.float32(0.99037844), bc=0.9998588269500368, n_inputs=1)
+2026-10-17 03:38:34,658 - INFO - testing.py:434 - 
+✓ PASS step 0 pred
+  L-inf: base=0.053461  tgt=0.051016  ratio=0.95x
+  L2/σ:  base=0.038147  tgt=0.037446  ratio=0.98x
+  σ-ratio: 0.982  BC: 0.9997
+2026-10-17 03:38:34,662 - INFO - testing.py:434 - 
+✓ PASS step 0 latents_out
+  L-inf: base=0.000903  tgt=0.000906  ratio=1.00x
+  L2/σ:  base=0.000534  tgt=0.000594  ratio=1.11x
+  σ-ratio: 1.113  BC: 0.9979
+step 0 pred: ThreeWayAssertResult(passed=True, name='step 0 pred', base_linf=0.05346110805208533, tgt_linf=0.05101622660133951, base_l2=0.038147242239343467, tgt_l2=0.03744623416058075, linf_ratio=0.9542680363384191, l2_ratio=0.9816236236851815, sigma_ratio=np.float32(0.98162353), bc=0.9997175067238878, n_inputs=1)
+2026-10-17 03:38:34,662 - INFO - testing.py:434 - 
+✓ PASS step 0 latents_out
+  L-inf: base=0.000903  tgt=0.000906  ratio=1.00x
+  L2/σ:  base=0.000534  tgt=0.000594  ratio=1.11x
+  σ-ratio: 1.113  BC: 0.9979
+step 0 latents_out: ThreeWayAssertResult(passed=True, name='step 0 latents_out', base_linf=0.0009034769162627804, tgt_linf=0.0009057848619188348, base_l2=0.0005339034795645556, tgt_l2=0.000594079748395916, linf_ratio=1.0025545153556343, l2_ratio=1.112710014327757, sigma_ratio=np.float32(1.1127088), bc=0.9978667928753535, n_inputs=1)
+.
+
+=============================== warnings summary ===============================
+test/neuron/test_hunyuan_image3_pipeline_accuracy.py: 14 warnings
+  /opt/conda/lib/python3.13/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 1 passed, 14 warnings in 434.14s (0:07:14) ==================
+__EXIT=0

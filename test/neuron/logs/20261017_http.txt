@@ -1,0 +1,6 @@
+http t2i request 0: 20051 ms
+http t2i request 1: 20130 ms
+http t2i request 2: 20066 ms
+http think request 0: 187124 ms
+http think request 1: 29097 ms
+http think request 2: 29171 ms

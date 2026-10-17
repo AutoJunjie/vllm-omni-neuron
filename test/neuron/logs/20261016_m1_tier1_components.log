@@ -1,0 +1,166 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspace/plugin
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collected 3 items
+
+test/neuron/test_hunyuan_image3_components_accuracy.py 2026-10-16 07:24:33,222 - WARNING - runtime.py:70 - Defaulting to PJRT_DEVICE=CPU
+INFO 10-16 07:24:33 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 10-16 07:24:33 [__init__.py:46] - neuron -> vllm_neuron:register
+INFO 10-16 07:24:33 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 10-16 07:24:33 [__init__.py:237] Platform plugin neuron is activated
+2026-10-16 07:24:33,575 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-16 07:24:33,575 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-16 07:24:33,594 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill key
+  L-inf: base=0.009358  tgt=0.004204  ratio=0.45x
+  L2/σ:  base=0.004595  tgt=0.002897  ratio=0.63x
+  σ-ratio: 0.630  BC: 0.9834
+2026-10-16 07:24:33,594 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill key
+  L-inf: base=0.009358  tgt=0.004204  ratio=0.45x
+  L2/σ:  base=0.004595  tgt=0.002897  ratio=0.63x
+  σ-ratio: 0.630  BC: 0.9834
+2026-10-16 07:24:33,598 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill value
+  L-inf: base=0.003369  tgt=0.003457  ratio=1.03x
+  L2/σ:  base=0.002857  tgt=0.002345  ratio=0.82x
+  σ-ratio: 0.821  BC: 0.9904
+layer 0 prefill key: ThreeWayAssertResult(passed=True, name='layer 0 prefill key', base_linf=0.00935758492256854, tgt_linf=0.0042036846453275085, base_l2=0.0045947781685521, tgt_l2=0.0028968490355174977, linf_ratio=0.4492275175819243, l2_ratio=0.6304654826090001, sigma_ratio=np.float32(0.63046557), bc=0.983445164374774, n_inputs=1)
+2026-10-16 07:24:33,598 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill value
+  L-inf: base=0.003369  tgt=0.003457  ratio=1.03x
+  L2/σ:  base=0.002857  tgt=0.002345  ratio=0.82x
+  σ-ratio: 0.821  BC: 0.9904
+2026-10-16 07:24:34,038 - INFO - testing.py:434 - 
+✓ PASS layer 0 denoise step
+  L-inf: base=0.004760  tgt=0.004340  ratio=0.91x
+  L2/σ:  base=0.001756  tgt=0.001756  ratio=1.00x
+  σ-ratio: 1.000  BC: 1.0000
+layer 0 prefill value: ThreeWayAssertResult(passed=True, name='layer 0 prefill value', base_linf=0.003369059916144833, tgt_linf=0.0034571793994980105, base_l2=0.002857386373363511, tgt_l2=0.002345395764302343, linf_ratio=1.0261555108981295, l2_ratio=0.8208185585841898, sigma_ratio=np.float32(0.8208189), bc=0.9904069460514395, n_inputs=1)
+2026-10-16 07:24:34,038 - INFO - testing.py:434 - 
+✓ PASS layer 0 denoise step
+  L-inf: base=0.004760  tgt=0.004340  ratio=0.91x
+  L2/σ:  base=0.001756  tgt=0.001756  ratio=1.00x
+  σ-ratio: 1.000  BC: 1.0000
+2026-10-16 07:24:34,528 - INFO - testing.py:434 - 
+✓ PASS patch embed
+  L-inf: base=0.005537  tgt=0.005537  ratio=1.00x
+  L2/σ:  base=0.002923  tgt=0.002807  ratio=0.96x
+  σ-ratio: 0.960  BC: 0.9986
+layer 0 denoise step: ThreeWayAssertResult(passed=True, name='layer 0 denoise step', base_linf=0.0047596561350959935, tgt_linf=0.004340307869768739, base_l2=0.0017564891262776172, tgt_l2=0.0017559015270072803, linf_ratio=0.9118952601984981, l2_ratio=0.9996654694517909, sigma_ratio=np.float32(0.99966836), bc=0.999999465147875, n_inputs=1)
+2026-10-16 07:24:34,528 - INFO - testing.py:434 - 
+✓ PASS patch embed
+  L-inf: base=0.005537  tgt=0.005537  ratio=1.00x
+  L2/σ:  base=0.002923  tgt=0.002807  ratio=0.96x
+  σ-ratio: 0.960  BC: 0.9986
+2026-10-16 07:24:34,543 - INFO - testing.py:434 - 
+✓ PASS final layer
+  L-inf: base=0.003491  tgt=0.002801  ratio=0.80x
+  L2/σ:  base=0.002526  tgt=0.002111  ratio=0.84x
+  σ-ratio: 0.835  BC: 0.9922
+patch embed: ThreeWayAssertResult(passed=True, name='patch embed', base_linf=0.005537440349980066, tgt_linf=0.005537440349980066, base_l2=0.0029226986121814163, tgt_l2=0.002806827431551338, linf_ratio=1.0, l2_ratio=0.960354728281889, sigma_ratio=np.float32(0.96043706), bc=0.998601086111587, n_inputs=1)
+2026-10-16 07:24:34,543 - INFO - testing.py:434 - 
+✓ PASS final layer
+  L-inf: base=0.003491  tgt=0.002801  ratio=0.80x
+  L2/σ:  base=0.002526  tgt=0.002111  ratio=0.84x
+  σ-ratio: 0.835  BC: 0.9922
+final layer: ThreeWayAssertResult(passed=True, name='final layer', base_linf=0.003491258906533857, tgt_linf=0.00280095548976076, base_l2=0.0025261021896964206, tgt_l2=0.0021105048734000424, linf_ratio=0.8022766471196964, l2_ratio=0.8354788187146446, sigma_ratio=np.float32(0.83547837), bc=0.992222640125787, n_inputs=1)
+.2026-10-16 07:27:18,612 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 2)
+  L-inf: base=0.001974  tgt=0.001804  ratio=0.91x
+  L2/σ:  base=0.000651  tgt=0.000667  ratio=1.02x
+  σ-ratio: 1.024  BC: 0.9999
+2026-10-16 07:27:18,612 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 2)
+  L-inf: base=0.001974  tgt=0.001804  ratio=0.91x
+  L2/σ:  base=0.000651  tgt=0.000667  ratio=1.02x
+  σ-ratio: 1.024  BC: 0.9999
+VAE decode (vae_parallel 2): ThreeWayAssertResult(passed=True, name='VAE decode (vae_parallel 2)', base_linf=0.001973542905539242, tgt_linf=0.0018043411739062875, base_l2=0.0006508286317485723, tgt_l2=0.0006665887560911949, linf_ratio=0.9142649844814381, l2_ratio=1.024215474817511, sigma_ratio=np.float32(1.0242105), bc=0.9998805222312617, n_inputs=1)
+.F
+
+=================================== FAILURES ===================================
+_____________________________ test_vae_decoder[1] ______________________________
+
+require_neuron_device = '/workspace/models/HunyuanImage-3.0-Instruct'
+vae_references = {'float32': tensor([[[[[ 0.4099,  0.5023,  0.4353,  ...,  0.0894,  0.0796,  0.1016],
+           [ 0.3374,  0.4805,  0....0.1276,  ..., -0.2397, -0.4534, -0.5732],
+           [ 0.3064,  0.3254,  0.4561,  ..., -0.2408, -0.4685, -0.6152]]]]])}
+tmp_path = PosixPath('/workspace/out/m1final/components/test_vae_decoder_1_0')
+vae_parallel = 1
+
+    @pytest.mark.parametrize("vae_parallel", [2, 1])
+    def test_vae_decoder(require_neuron_device, vae_references, tmp_path, vae_parallel):
+        inputs = tmp_path / "inputs.pt"
+        _inputs(inputs)
+        args = ["--mode", "vae", "--model-path", require_neuron_device, "--inputs", str(inputs), "--device", "neuron",
+                "--dtype", "float16", "--output", str(tmp_path / "neuron.pt")]
+        if vae_parallel > 1:
+            run(["torchrun", "--nproc-per-node", str(WORLD), WORKER, *args, "--vae-parallel", str(vae_parallel)],
+                tmp_path / "neuron.log")
+        else:
+>           run(_worker(*args), tmp_path / "neuron.log", env={"NEURON_RT_VISIBLE_CORES": "0"})
+
+test/neuron/test_hunyuan_image3_components_accuracy.py:128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/neuron/hy3_helpers.py:49: in run
+    return wait(start(cmd, log_path, env), timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+proc = <Popen: returncode: -15 args: ['/opt/conda/bin/python', '/workspace/plugin/t...>
+timeout = None
+
+    def wait(proc: subprocess.Popen, timeout=None) -> str:
+        """Wait for a :func:`start`-ed process; its log text, or an error with the log's tail."""
+        returncode = proc.wait(timeout=timeout)
+        proc.log.close()
+        text = open(proc.log_path, errors="replace").read()
+        if returncode != 0:
+            tail = "\n".join(text.splitlines()[-40:])
+>           raise AssertionError(f"{' '.join(map(str, proc.args[:4]))} ... exited {returncode}; {proc.log_path}:\n{tail}")
+E           AssertionError: /opt/conda/bin/python /workspace/plugin/test/neuron/hy3_component_worker.py --mode vae ... exited -15; /workspace/out/m1final/components/test_vae_decoder_1_0/neuron.log:
+E           INFO 10-16 07:27:21 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+E           INFO 10-16 07:27:21 [__init__.py:46] - neuron -> vllm_neuron:register
+E           INFO 10-16 07:27:21 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+E           INFO 10-16 07:27:21 [__init__.py:237] Platform plugin neuron is activated
+E           2026-10-16 07:27:21,818 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+E           2026-10-16 07:27:21,818 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+E           INFO 10-16 07:27:25 [__init__.py:39] Available plugins for group vllm_omni.platform_plugins:
+E           INFO 10-16 07:27:25 [__init__.py:41] - neuron -> vllm_omni_neuron:neuron_omni_platform_plugin
+E           INFO 10-16 07:27:25 [__init__.py:44] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+E           INFO 10-16 07:27:25 [__init__.py:154] OmniPlatform plugin neuron is activated
+E           WARNING 10-16 07:27:25 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+E           WARNING 10-16 07:27:25 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+E           WARNING 10-16 07:27:25 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+E           WARNING 10-16 07:27:25 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+E           INFO 10-16 07:27:26 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.
+E           [transformers] `Siglip2ImageProcessorFast` is deprecated. The `Fast` suffix for image processors has been removed; use `Siglip2ImageProcessor` instead.
+E           [transformers] You are using a model of type `hunyuan_image_3_moe` to instantiate a model of type `Hunyuan`. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+E           [transformers] Missing validation function in 'RotaryEmbeddingConfigMixin' for 'rope_type'='custom'
+E           [transformers] Missing validation function in 'RotaryEmbeddingConfigMixin' for 'rope_type'='custom'
+E           [transformers] Missing validation function in 'RotaryEmbeddingConfigMixin' for 'rope_type'='custom'
+E           2026-10-16 07:27:46,689 - INFO - vae_device.py:280 - HunyuanImage3: VAE decoder on neuron:0 in torch.float16, 38 NKI convs (6 on compiler, 1.61 GiB of duplicate weights released), 7 stages, built in 13.2s
+E           2026-10-16 07:27:47,031 - INFO - aliasing_analysis.py:744 - AliasingInfo (post-AOT order) = AliasingInfo(aliases=[])
+E           2026-10-16 07:27:47,031 - INFO - aliasing_analysis.py:745 - Mutated inputs: [], Explicit outputs: 1
+E           2026-10-16 07:27:48,361 - INFO - aliasing_analysis.py:744 - AliasingInfo (post-AOT order) = AliasingInfo(aliases=[])
+E           2026-10-16 07:27:48,361 - INFO - aliasing_analysis.py:745 - Mutated inputs: [], Explicit outputs: 1
+E           2026-10-16 07:27:50,241 - INFO - aliasing_analysis.py:744 - AliasingInfo (post-AOT order) = AliasingInfo(aliases=[])
+E           2026-10-16 07:27:50,241 - INFO - aliasing_analysis.py:745 - Mutated inputs: [], Explicit outputs: 1
+E           2026-10-16 07:28:00,324 - INFO - aliasing_analysis.py:744 - AliasingInfo (post-AOT order) = AliasingInfo(aliases=[])
+E           2026-10-16 07:28:00,324 - INFO - aliasing_analysis.py:745 - Mutated inputs: [], Explicit outputs: 1
+E           2026-10-16 07:28:14,616 - INFO - aliasing_analysis.py:744 - AliasingInfo (post-AOT order) = AliasingInfo(aliases=[])
+E           2026-10-16 07:28:14,616 - INFO - aliasing_analysis.py:745 - Mutated inputs: [], Explicit outputs: 1
+
+test/neuron/hy3_helpers.py:44: AssertionError
+=============================== warnings summary ===============================
+test/neuron/test_hunyuan_image3_components_accuracy.py: 14 warnings
+  /opt/conda/lib/python3.13/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/neuron/test_hunyuan_image3_components_accuracy.py::test_vae_decoder[1]
+============ 1 failed, 2 passed, 14 warnings in 1243.47s (0:20:43) =============
+__EXIT=1

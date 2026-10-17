@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspace/plugin
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collected 1 item
+
+test/neuron/test_hunyuan_image3_e2e_accuracy.py t2i: warm requests [19.36, 19.37] s
+t2i: SSIM 1.0000, PSNR inf dB against hunyuan_image3_t2i_mars_seed42.png
+.
+
+======================== 1 passed in 299.01s (0:04:59) =========================

@@ -1,0 +1,100 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspace/plugin
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collected 3 items
+
+test/neuron/test_hunyuan_image3_components_accuracy.py 2026-10-15 09:07:54,065 - WARNING - runtime.py:70 - Defaulting to PJRT_DEVICE=CPU
+INFO 10-15 09:07:54 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 10-15 09:07:54 [__init__.py:46] - neuron -> vllm_neuron:register
+INFO 10-15 09:07:54 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 10-15 09:07:54 [__init__.py:237] Platform plugin neuron is activated
+2026-10-15 09:07:54,421 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-15 09:07:54,421 - INFO - port_hold_patch.py:204 - Port-hold patch applied (EADDRINUSE file-rendezvous)
+2026-10-15 09:07:54,437 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill key
+  L-inf: base=0.009358  tgt=0.004204  ratio=0.45x
+  L2/σ:  base=0.004595  tgt=0.002897  ratio=0.63x
+  σ-ratio: 0.630  BC: 0.9834
+2026-10-15 09:07:54,437 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill key
+  L-inf: base=0.009358  tgt=0.004204  ratio=0.45x
+  L2/σ:  base=0.004595  tgt=0.002897  ratio=0.63x
+  σ-ratio: 0.630  BC: 0.9834
+2026-10-15 09:07:54,439 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill value
+  L-inf: base=0.003369  tgt=0.003457  ratio=1.03x
+  L2/σ:  base=0.002857  tgt=0.002345  ratio=0.82x
+  σ-ratio: 0.821  BC: 0.9904
+layer 0 prefill key: ThreeWayAssertResult(passed=True, name='layer 0 prefill key', base_linf=0.00935758492256854, tgt_linf=0.0042036846453275085, base_l2=0.0045947781685521, tgt_l2=0.0028968490355174977, linf_ratio=0.4492275175819243, l2_ratio=0.6304654826090001, sigma_ratio=np.float32(0.63046557), bc=0.983445164374774, n_inputs=1)
+2026-10-15 09:07:54,439 - INFO - testing.py:434 - 
+✓ PASS layer 0 prefill value
+  L-inf: base=0.003369  tgt=0.003457  ratio=1.03x
+  L2/σ:  base=0.002857  tgt=0.002345  ratio=0.82x
+  σ-ratio: 0.821  BC: 0.9904
+2026-10-15 09:07:54,882 - INFO - testing.py:434 - 
+✓ PASS layer 0 denoise step
+  L-inf: base=0.004760  tgt=0.004340  ratio=0.91x
+  L2/σ:  base=0.001756  tgt=0.001756  ratio=1.00x
+  σ-ratio: 1.000  BC: 1.0000
+layer 0 prefill value: ThreeWayAssertResult(passed=True, name='layer 0 prefill value', base_linf=0.003369059916144833, tgt_linf=0.0034571793994980105, base_l2=0.002857386373363511, tgt_l2=0.002345395764302343, linf_ratio=1.0261555108981295, l2_ratio=0.8208185585841898, sigma_ratio=np.float32(0.8208189), bc=0.9904069460514395, n_inputs=1)
+2026-10-15 09:07:54,882 - INFO - testing.py:434 - 
+✓ PASS layer 0 denoise step
+  L-inf: base=0.004760  tgt=0.004340  ratio=0.91x
+  L2/σ:  base=0.001756  tgt=0.001756  ratio=1.00x
+  σ-ratio: 1.000  BC: 1.0000
+2026-10-15 09:07:55,370 - INFO - testing.py:434 - 
+✓ PASS patch embed
+  L-inf: base=0.005537  tgt=0.005537  ratio=1.00x
+  L2/σ:  base=0.002923  tgt=0.002807  ratio=0.96x
+  σ-ratio: 0.960  BC: 0.9986
+layer 0 denoise step: ThreeWayAssertResult(passed=True, name='layer 0 denoise step', base_linf=0.0047596561350959935, tgt_linf=0.004340307869768739, base_l2=0.0017564891262776172, tgt_l2=0.0017559015270072803, linf_ratio=0.9118952601984981, l2_ratio=0.9996654694517909, sigma_ratio=np.float32(0.99966836), bc=0.999999465147875, n_inputs=1)
+2026-10-15 09:07:55,370 - INFO - testing.py:434 - 
+✓ PASS patch embed
+  L-inf: base=0.005537  tgt=0.005537  ratio=1.00x
+  L2/σ:  base=0.002923  tgt=0.002807  ratio=0.96x
+  σ-ratio: 0.960  BC: 0.9986
+2026-10-15 09:07:55,386 - INFO - testing.py:434 - 
+✓ PASS final layer
+  L-inf: base=0.003491  tgt=0.002801  ratio=0.80x
+  L2/σ:  base=0.002526  tgt=0.002111  ratio=0.84x
+  σ-ratio: 0.835  BC: 0.9922
+patch embed: ThreeWayAssertResult(passed=True, name='patch embed', base_linf=0.005537440349980066, tgt_linf=0.005537440349980066, base_l2=0.0029226986121814163, tgt_l2=0.002806827431551338, linf_ratio=1.0, l2_ratio=0.960354728281889, sigma_ratio=np.float32(0.96043706), bc=0.998601086111587, n_inputs=1)
+2026-10-15 09:07:55,386 - INFO - testing.py:434 - 
+✓ PASS final layer
+  L-inf: base=0.003491  tgt=0.002801  ratio=0.80x
+  L2/σ:  base=0.002526  tgt=0.002111  ratio=0.84x
+  σ-ratio: 0.835  BC: 0.9922
+final layer: ThreeWayAssertResult(passed=True, name='final layer', base_linf=0.003491258906533857, tgt_linf=0.00280095548976076, base_l2=0.0025261021896964206, tgt_l2=0.0021105048734000424, linf_ratio=0.8022766471196964, l2_ratio=0.8354788187146446, sigma_ratio=np.float32(0.83547837), bc=0.992222640125787, n_inputs=1)
+.2026-10-15 09:10:46,986 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 2)
+  L-inf: base=0.001974  tgt=0.001804  ratio=0.91x
+  L2/σ:  base=0.000651  tgt=0.000667  ratio=1.02x
+  σ-ratio: 1.024  BC: 0.9999
+2026-10-15 09:10:46,986 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 2)
+  L-inf: base=0.001974  tgt=0.001804  ratio=0.91x
+  L2/σ:  base=0.000651  tgt=0.000667  ratio=1.02x
+  σ-ratio: 1.024  BC: 0.9999
+VAE decode (vae_parallel 2): ThreeWayAssertResult(passed=True, name='VAE decode (vae_parallel 2)', base_linf=0.001973542905539242, tgt_linf=0.0018043411739062875, base_l2=0.0006508286317485723, tgt_l2=0.0006665887560911949, linf_ratio=0.9142649844814381, l2_ratio=1.024215474817511, sigma_ratio=np.float32(1.0242105), bc=0.9998805222312617, n_inputs=1)
+.2026-10-15 09:12:33,641 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 1)
+  L-inf: base=0.001974  tgt=0.001613  ratio=0.82x
+  L2/σ:  base=0.000651  tgt=0.000633  ratio=0.97x
+  σ-ratio: 0.972  BC: 0.9999
+2026-10-15 09:12:33,641 - INFO - testing.py:434 - 
+✓ PASS VAE decode (vae_parallel 1)
+  L-inf: base=0.001974  tgt=0.001613  ratio=0.82x
+  L2/σ:  base=0.000651  tgt=0.000633  ratio=0.97x
+  σ-ratio: 0.972  BC: 0.9999
+VAE decode (vae_parallel 1): ThreeWayAssertResult(passed=True, name='VAE decode (vae_parallel 1)', base_linf=0.001973542905539242, tgt_linf=0.0016126799740562648, base_l2=0.0006508286317485723, tgt_l2=0.0006328491446816701, linf_ratio=0.817149690300563, l2_ratio=0.9723744681935751, sigma_ratio=np.float32(0.9723765), bc=0.9998760725618641, n_inputs=1)
+.
+
+=============================== warnings summary ===============================
+test/neuron/test_hunyuan_image3_components_accuracy.py: 14 warnings
+  /opt/conda/lib/python3.13/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 3 passed, 14 warnings in 377.82s (0:06:17) ==================

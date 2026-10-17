@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
+rootdir: /workspace/plugin
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collected 3 items
+
+test/neuron/test_hunyuan_image3_e2e_accuracy.py t2i: warm requests [19.41, 19.37] s
+t2i: wrote golden /workspace/plugin/test/neuron/goldens/hunyuan_image3_t2i_mars_seed42.png
+.edit: warm requests [24.97, 28.6] s
+edit: wrote golden /workspace/plugin/test/neuron/goldens/hunyuan_image3_edit_starry_seed42.png
+.t2i_think: warm requests [28.5, 28.54] s
+t2i_think: wrote golden /workspace/plugin/test/neuron/goldens/hunyuan_image3_t2i_think_mars_seed42.png
+.
+
+======================== 3 passed in 1480.03s (0:24:40) ========================
+__EXIT=0
